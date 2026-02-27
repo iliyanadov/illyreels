@@ -25,7 +25,7 @@ const CURSORS: Record<Handle, string> = {
 
 // Header overlay (Twitter/X style) drawn above the video area inside the crop box
 const BASE_HEADER_HEIGHT = 110; // Height without caption
-const CAPTION_LINE_HEIGHT = 50; // Height per caption line
+const CAPTION_LINE_HEIGHT = 60; // Height per caption line
 const CAPTION_TOP_PADDING = 80; // Padding above first caption line
 const HEADER_PADDING_X = 32;
 const HEADER_PADDING_TOP = 14;
