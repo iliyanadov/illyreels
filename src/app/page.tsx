@@ -290,8 +290,7 @@ export default function Home() {
                       />
                     </td>
                     <td className="px-4 py-3">
-                      <input
-                        type="text"
+                      <textarea
                         value={entry.caption}
                         onChange={e => updateEntry(entry.id, 'caption', e.target.value)}
                         onKeyDown={e => {
@@ -301,7 +300,8 @@ export default function Home() {
                         }}
                         disabled={entry.data !== null}
                         placeholder="Caption (required)..."
-                        className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white placeholder-zinc-500 outline-none focus:border-zinc-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        rows={2}
+                        className="w-full min-h-[60px] resize-none rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white placeholder-zinc-500 outline-none focus:border-zinc-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                       />
                     </td>
                     <td className="px-4 py-3">

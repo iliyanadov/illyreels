@@ -214,20 +214,35 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
         const captionFont = '400 38px system-ui, sans-serif';
         ctx.font = captionFont;
         const maxWidth = cw - padX * 2;
-        const words = overlayCaption.split(' ');
-        let line = '';
-        captionLines = 1;
-        
-        for (let i = 0; i < words.length; i++) {
-          const testLine = line + words[i] + ' ';
-          const metrics = ctx.measureText(testLine);
-          
-          if (metrics.width > maxWidth && i > 0) {
+
+        // Split by user's explicit newlines first
+        const userLines = overlayCaption.split('\n');
+
+        for (let lineIndex = 0; lineIndex < userLines.length; lineIndex++) {
+          const userLine = userLines[lineIndex];
+          if (!userLine) {
+            // Empty line counts as one line
             captionLines++;
-            line = words[i] + ' ';
-          } else {
-            line = testLine;
+            continue;
           }
+
+          // Count wrapped lines for each user line
+          const words = userLine.split(' ');
+          let line = '';
+          let lineCount = 1; // at least one line per user line
+
+          for (let i = 0; i < words.length; i++) {
+            const testLine = line + words[i] + ' ';
+            const metrics = ctx.measureText(testLine);
+
+            if (metrics.width > maxWidth && i > 0) {
+              lineCount++;
+              line = words[i] + ' ';
+            } else {
+              line = testLine;
+            }
+          }
+          captionLines += lineCount;
         }
       }
 
@@ -306,26 +321,38 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
         
         ctx.font = captionFont;
         ctx.fillStyle = captionColor;
-        
-        // Wrap caption text if it's too long
+
+        // Split by user's explicit newlines first, then wrap each line
+        const userLines = overlayCaption.split('\n');
         const maxWidth = cw - padX * 2;
-        const words = overlayCaption.split(' ');
-        let line = '';
         let y = captionBaseline;
-        
-        for (let i = 0; i < words.length; i++) {
-          const testLine = line + words[i] + ' ';
-          const metrics = ctx.measureText(testLine);
-          
-          if (metrics.width > maxWidth && i > 0) {
-            ctx.fillText(line, captionLeft, y);
-            line = words[i] + ' ';
+
+        for (let lineIndex = 0; lineIndex < userLines.length; lineIndex++) {
+          const userLine = userLines[lineIndex];
+          if (!userLine) {
+            // Empty line from user - just advance Y
             y += CAPTION_LINE_HEIGHT;
-          } else {
-            line = testLine;
+            continue;
           }
+
+          const words = userLine.split(' ');
+          let line = '';
+
+          for (let i = 0; i < words.length; i++) {
+            const testLine = line + words[i] + ' ';
+            const metrics = ctx.measureText(testLine);
+
+            if (metrics.width > maxWidth && i > 0) {
+              ctx.fillText(line, captionLeft, y);
+              line = words[i] + ' ';
+              y += CAPTION_LINE_HEIGHT;
+            } else {
+              line = testLine;
+            }
+          }
+          ctx.fillText(line, captionLeft, y);
+          y += CAPTION_LINE_HEIGHT;
         }
-        ctx.fillText(line, captionLeft, y);
       }
 
       return headerHeight; // Return the calculated height
@@ -342,31 +369,46 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
 
         // Calculate header position first to know where to draw it
         // We need to call drawHeader to get the height, but we'll redraw it at the correct position
-        
+
         // First pass: calculate the header height without drawing
         let captionLines = 0;
         if (overlayCaption) {
           const captionFont = '400 38px system-ui, sans-serif';
           ctx.font = captionFont;
           const maxWidth = CANVAS_W - (HEADER_PADDING_X + 30) * 2;
-          const words = overlayCaption.split(' ');
-          let line = '';
-          captionLines = 1;
-          
-          for (let i = 0; i < words.length; i++) {
-            const testLine = line + words[i] + ' ';
-            const metrics = ctx.measureText(testLine);
-            
-            if (metrics.width > maxWidth && i > 0) {
+
+          // Split by user's explicit newlines first (same logic as drawHeader)
+          const userLines = overlayCaption.split('\n');
+
+          for (let lineIndex = 0; lineIndex < userLines.length; lineIndex++) {
+            const userLine = userLines[lineIndex];
+            if (!userLine) {
+              // Empty line counts as one line
               captionLines++;
-              line = words[i] + ' ';
-            } else {
-              line = testLine;
+              continue;
             }
+
+            // Count wrapped lines for each user line
+            const words = userLine.split(' ');
+            let line = '';
+            let lineCount = 1;
+
+            for (let i = 0; i < words.length; i++) {
+              const testLine = line + words[i] + ' ';
+              const metrics = ctx.measureText(testLine);
+
+              if (metrics.width > maxWidth && i > 0) {
+                lineCount++;
+                line = words[i] + ' ';
+              } else {
+                line = testLine;
+              }
+            }
+            captionLines += lineCount;
           }
         }
-        
-        const headerHeight = overlayCaption 
+
+        const headerHeight = overlayCaption
           ? BASE_HEADER_HEIGHT + CAPTION_TOP_PADDING + (captionLines * CAPTION_LINE_HEIGHT)
           : BASE_HEADER_HEIGHT;
 
@@ -777,22 +819,21 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     // Calculate header height
     let headerHeight = BASE_HEADER_HEIGHT;
     if (overlayCaption) {
-      // Roughly estimate caption lines (same logic as draw loop)
-      const captionFont = '400 38px system-ui, sans-serif';
-      const maxWidth = CANVAS_W - (HEADER_PADDING_X + 30) * 2;
-      const words = overlayCaption.split(' ');
-      let line = '';
-      let captionLines = 1;
-      for (let i = 0; i < words.length; i++) {
-        const testLine = line + words[i] + ' ';
-        // This is an approximation - we can't measure text without canvas context
-        if (testLine.length > 40) { // rough estimate
-          captionLines++;
-          line = words[i] + ' ';
-        } else {
-          line = testLine;
+      // Count actual lines from newlines + wrapped lines
+      const userLines = overlayCaption.split('\n');
+      let captionLines = 0;
+
+      for (const userLine of userLines) {
+        if (!userLine) {
+          captionLines++; // empty line
+          continue;
         }
+        // Estimate wrapped lines (rough approximation)
+        const estimatedCharsPerLine = 35;
+        const wrappedLines = Math.ceil(userLine.length / estimatedCharsPerLine);
+        captionLines += wrappedLines;
       }
+
       headerHeight = BASE_HEADER_HEIGHT + CAPTION_TOP_PADDING + (captionLines * CAPTION_LINE_HEIGHT);
     }
 
