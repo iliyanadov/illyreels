@@ -948,6 +948,20 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
             <line x1="8" y1="11" x2="14" y2="11"/>
           </svg>
         </button>
+        <button
+          onClick={() => {
+            videoScaleRef.current = 1;
+            setVideoScale(1);
+          }}
+          disabled={videoScale === 1}
+          className="flex items-center justify-center w-8 h-8 rounded-lg border border-zinc-700 text-zinc-400 hover:border-zinc-500 hover:text-zinc-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          title="Reset zoom"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+            <path d="M3 3v5h5"/>
+          </svg>
+        </button>
       </div>
 
       {/* Outer wrapper — overflow:visible so handles can extend outside canvas bounds */}
