@@ -422,6 +422,9 @@ export default function Home() {
             <table className="w-full">
               <thead>
                 <tr className="border-b border-zinc-800">
+                  <th className="px-3 py-3 text-center text-xs font-semibold text-zinc-400 uppercase tracking-wider w-12">
+                    #
+                  </th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-400 uppercase tracking-wider">
                     Video URL
                   </th>
@@ -439,6 +442,9 @@ export default function Home() {
               <tbody>
                 {entries.map((entry, index) => (
                   <tr key={entry.id} className="border-b border-zinc-800 last:border-b-0">
+                    <td className="px-3 py-3 text-center">
+                      <span className="text-sm font-medium text-zinc-500">{index + 1}</span>
+                    </td>
                     <td className="px-4 py-3">
                       <input
                         type="url"
@@ -554,37 +560,43 @@ export default function Home() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2">
-            {entries.filter(e => e.data && !e.loading && !(e.data.images && e.data.images.length > 0)).map((entry, index) => (
-              <div key={entry.id} className="flex flex-col">
-                <TikTokCanvas
-                  ref={(ref) => {
-                    if (ref) {
-                      canvasRefsMap.current.set(entry.id, ref);
-                    } else {
-                      canvasRefsMap.current.delete(entry.id);
-                    }
-                  }}
-                  videoSrc={proxyStreamUrl(entry.data!.hdplay || entry.data!.play || entry.data!.wmplay)}
-                  videoId={entry.data!.id}
-                  overlayCaption={entry.caption}
-                  eventId={entry.eventId}
-                  marketData={entry.marketData}
-                />
+            {entries.filter(e => e.data && !e.loading && !(e.data.images && e.data.images.length > 0)).map((entry) => {
+              const rowIndex = entries.findIndex(e => e.id === entry.id);
+              return (
+                <div key={entry.id} className="flex flex-col">
+                  <div className="flex items-center justify-between px-2 py-1 mb-1">
+                    <span className="text-xs font-semibold text-zinc-500">Row {rowIndex + 1}</span>
+                  </div>
+                  <TikTokCanvas
+                    ref={(ref) => {
+                      if (ref) {
+                        canvasRefsMap.current.set(entry.id, ref);
+                      } else {
+                        canvasRefsMap.current.delete(entry.id);
+                      }
+                    }}
+                    videoSrc={proxyStreamUrl(entry.data!.hdplay || entry.data!.play || entry.data!.wmplay)}
+                    videoId={entry.data!.id}
+                    overlayCaption={entry.caption}
+                    eventId={entry.eventId}
+                    marketData={entry.marketData}
+                  />
 
-                <button
-                  onClick={() => removeRow(entry.id)}
-                  className="mt-4 flex items-center justify-center gap-2 rounded-lg border border-red-700 bg-red-950/20 px-4 py-2 text-xs font-semibold text-red-400 hover:bg-red-950/40 hover:border-red-600 transition-colors"
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="3 6 5 6 21 6"/>
-                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                    <line x1="10" y1="11" x2="10" y2="17"/>
-                    <line x1="14" y1="11" x2="14" y2="17"/>
-                  </svg>
-                  Delete
-                </button>
-              </div>
-            ))}
+                  <button
+                    onClick={() => removeRow(entry.id)}
+                    className="mt-4 flex items-center justify-center gap-2 rounded-lg border border-red-700 bg-red-950/20 px-4 py-2 text-xs font-semibold text-red-400 hover:bg-red-950/40 hover:border-red-600 transition-colors"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="3 6 5 6 21 6"/>
+                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                      <line x1="10" y1="11" x2="10" y2="17"/>
+                      <line x1="14" y1="11" x2="14" y2="17"/>
+                    </svg>
+                    Delete
+                  </button>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
