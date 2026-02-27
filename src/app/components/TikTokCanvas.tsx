@@ -211,7 +211,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
       // Calculate number of caption lines to determine dynamic header height
       let captionLines = 0;
       if (overlayCaption) {
-        const captionFont = '400 38px system-ui, sans-serif';
+        const captionFont = '400 42px Chirp, "Comic Sans MS", cursive';
         ctx.font = captionFont;
         const maxWidth = cw - padX * 2;
 
@@ -314,7 +314,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
 
       // Caption: below the handle if provided
       if (overlayCaption) {
-        const captionFont = '400 38px system-ui, sans-serif';
+        const captionFont = '400 42px Chirp, "Comic Sans MS", cursive';
         const captionColor = 'rgb(231, 233, 234)';
         const captionBaseline = handleBaseline + CAPTION_TOP_PADDING;
         const captionLeft = cx + padX;
@@ -373,7 +373,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
         // First pass: calculate the header height without drawing
         let captionLines = 0;
         if (overlayCaption) {
-          const captionFont = '400 38px system-ui, sans-serif';
+          const captionFont = '400 42px Chirp, "Comic Sans MS", cursive';
           ctx.font = captionFont;
           const maxWidth = CANVAS_W - (HEADER_PADDING_X + 30) * 2;
 
