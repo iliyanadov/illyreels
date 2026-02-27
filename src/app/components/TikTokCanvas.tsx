@@ -157,12 +157,35 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
 
   // ── Reset on new video ───────────────────────────────────────────────────────
   useEffect(() => {
-    const b = { x: 0, y: 0, w: CANVAS_W, h: CANVAS_H };
-    boxRef.current = b;
-    setBox(b);
-    videoOffsetRef.current = { x: 0, y: 0 };
-    videoScaleRef.current = 1;
-    setVideoScale(1);
+    const video = videoRef.current;
+    if (!video) return;
+
+    const handleLoadedMetadata = () => {
+      const vw = video.videoWidth;
+      const vh = video.videoHeight;
+      if (vw && vh) {
+        // Calculate scale to fit video to VIDEO_TARGET_W width
+        const scale = Math.min(VIDEO_TARGET_W / vw, CANVAS_H / vh);
+        const drawW = vw * scale;
+        const drawH = vh * scale;
+
+        // Center the crop box on the canvas
+        const x = (CANVAS_W - drawW) / 2;
+        const y = (CANVAS_H - drawH) / 2;
+
+        const b = { x, y, w: drawW, h: drawH };
+        boxRef.current = b;
+        setBox(b);
+        videoOffsetRef.current = { x: 0, y: 0 };
+        videoScaleRef.current = 1;
+        setVideoScale(1);
+      }
+    };
+
+    video.addEventListener('loadedmetadata', handleLoadedMetadata);
+    return () => {
+      video.removeEventListener('loadedmetadata', handleLoadedMetadata);
+    };
   }, [videoSrc]);
 
   // ── Draw loop (black bg + global header + cropped video) ─────────────────────
