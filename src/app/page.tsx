@@ -129,7 +129,7 @@ export default function Home() {
   // Google Sheets state
   const [googleToken, setGoogleToken] = useState<{ accessToken: string; refreshToken?: string } | null>(null);
   const [showSheetsModal, setShowSheetsModal] = useState(false);
-  const [spreadsheetId, setSpreadsheetId] = useState('');
+  const [spreadsheetId, setSpreadsheetId] = useState('1z9KIhjPJFo9rOJ4CDW-y7W9W4MEm8Lso-EsFRknbv5w');
   const [sheetName, setSheetName] = useState('Sheet1');
   const [startRow, setStartRow] = useState('4');
   const [endRow, setEndRow] = useState('32');
@@ -162,6 +162,12 @@ export default function Home() {
   function removeRow(id: string) {
     if (entries.length === 1) return; // Keep at least one row
     setEntries(entries.filter(e => e.id !== id));
+  }
+
+  function resetEverything() {
+    setEntries([
+      { id: '1', url: '', caption: '', eventId: '', data: null, marketData: null, loading: false, loadingMarket: false, error: '', marketError: '' }
+    ]);
   }
 
   function updateEntry(id: string, field: 'url' | 'caption' | 'eventId', value: string) {
@@ -354,7 +360,7 @@ export default function Home() {
         </p>
 
         {/* Google Sheets Import */}
-        <div className="mt-6 flex items-center justify-center gap-3">
+        <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
           {googleToken ? (
             <>
               <span className="text-xs text-green-400">✓ Connected to Google Sheets</span>
@@ -382,6 +388,13 @@ export default function Home() {
               Connect Google Sheets
             </button>
           )}
+          <div className="w-px h-6 bg-zinc-800 mx-1"></div>
+          <button
+            onClick={resetEverything}
+            className="rounded-lg border border-orange-700 bg-orange-950/20 px-4 py-2 text-xs font-semibold text-orange-400 hover:bg-orange-950/40 hover:border-orange-600 transition-colors"
+          >
+            Reset All
+          </button>
         </div>
       </div>
 
