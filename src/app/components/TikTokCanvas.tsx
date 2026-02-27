@@ -88,6 +88,7 @@ interface Props {
   overlayDate?: string;
   overlayVerified?: boolean;
   overlayCaption?: string;
+  eventId?: string;
   marketData?: MarketData | null;
 }
 
@@ -103,6 +104,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
   overlayDate = 'Jan 22',
   overlayVerified = true,
   overlayCaption = '',
+  eventId = '',
   marketData = null,
 }: Props, ref) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -388,38 +390,36 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
         ctx.drawImage(video, dx, dy, drawW, drawH);
         ctx.restore();
 
-        // Draw box below the video
-        const boxY = y + h + 30; // 30px gap below video (increased from 10px)
-        const boxHeight = 140; // Height of the box (increased for more vertical padding)
-        const boxPadding = 60; // Padding from edges (increased from 40px)
-        
-        // Draw rounded rectangle with black background and gray border
-        ctx.fillStyle = '#000';
-        ctx.strokeStyle = 'rgba(113, 118, 123, 0.5)'; // thin gray border
-        ctx.lineWidth = 1;
-        
-        // Rounded rectangle path
-        const radius = 16; // Increased corner radius
-        const boxX = boxPadding;
-        const boxWidth = CANVAS_W - boxPadding * 2;
-        
-        ctx.beginPath();
-        ctx.moveTo(boxX + radius, boxY);
-        ctx.lineTo(boxX + boxWidth - radius, boxY);
-        ctx.quadraticCurveTo(boxX + boxWidth, boxY, boxX + boxWidth, boxY + radius);
-        ctx.lineTo(boxX + boxWidth, boxY + boxHeight - radius);
-        ctx.quadraticCurveTo(boxX + boxWidth, boxY + boxHeight, boxX + boxWidth - radius, boxY + boxHeight);
-        ctx.lineTo(boxX + radius, boxY + boxHeight);
-        ctx.quadraticCurveTo(boxX, boxY + boxHeight, boxX, boxY + boxHeight - radius);
-        ctx.lineTo(boxX, boxY + radius);
-        ctx.quadraticCurveTo(boxX, boxY, boxX + radius, boxY);
-        ctx.closePath();
-        
-        ctx.fill();
-        ctx.stroke();
-        
-        // Draw market data if available
-        if (marketData && marketData.markets && marketData.markets.length > 0) {
+        // Draw market data box below the video (only if eventId is provided)
+        if (eventId?.trim() && marketData && marketData.markets && marketData.markets.length > 0) {
+          const boxY = y + h + 30; // 30px gap below video
+          const boxHeight = 140; // Height of the box
+          const boxPadding = 60; // Padding from edges
+
+          // Draw rounded rectangle with black background and gray border
+          ctx.fillStyle = '#000';
+          ctx.strokeStyle = 'rgba(113, 118, 123, 0.5)';
+          ctx.lineWidth = 1;
+
+          // Rounded rectangle path
+          const radius = 16;
+          const boxX = boxPadding;
+          const boxWidth = CANVAS_W - boxPadding * 2;
+
+          ctx.beginPath();
+          ctx.moveTo(boxX + radius, boxY);
+          ctx.lineTo(boxX + boxWidth - radius, boxY);
+          ctx.quadraticCurveTo(boxX + boxWidth, boxY, boxX + boxWidth, boxY + radius);
+          ctx.lineTo(boxX + boxWidth, boxY + boxHeight - radius);
+          ctx.quadraticCurveTo(boxX + boxWidth, boxY + boxHeight, boxX + boxWidth - radius, boxY + boxHeight);
+          ctx.lineTo(boxX + radius, boxY + boxHeight);
+          ctx.quadraticCurveTo(boxX, boxY + boxHeight, boxX, boxY + boxHeight - radius);
+          ctx.lineTo(boxX, boxY + radius);
+          ctx.quadraticCurveTo(boxX, boxY, boxX + radius, boxY);
+          ctx.closePath();
+
+          ctx.fill();
+          ctx.stroke();
           const market = marketData.markets[0]; // Use first market
           const textPadding = 40; // Increased internal padding
           const imageSize = 80; // Increased square image size
