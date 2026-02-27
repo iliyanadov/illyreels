@@ -1,17 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { google } from 'googleapis';
 
 export const runtime = 'nodejs';
 
 interface SheetRow {
   url: string;
   caption: string;
-  eventId?: string;
-}
-
-interface SheetsResponse {
-  rows: SheetRow[];
-  error?: string;
+  eventId: string;
 }
 
 export async function GET(request: NextRequest) {
@@ -20,6 +14,7 @@ export async function GET(request: NextRequest) {
   const spreadsheetId = searchParams.get('spreadsheet_id');
   const startRow = searchParams.get('start_row') || '4';
   const endRow = searchParams.get('end_row') || '32';
+  const sheetName = searchParams.get('sheet_name') || 'Sheet1';
 
   if (!accessToken) {
     return NextResponse.json(
@@ -36,21 +31,31 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const auth = new google.auth.OAuth2();
-    auth.setCredentials({ access_token: accessToken });
+    const range = `${encodeURIComponent(sheetName)}!A${startRow}:B${endRow}`;
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}`;
 
-    const sheets = google.sheets({ version: 'v4', auth });
+    console.log('Fetching from:', url);
 
-    // Fetch data from columns A (URL) and B (caption), rows 4-32
-    // Using A1 notation: A4:B32
-    const range = `Sheet1!A${startRow}:B${endRow}`;
-
-    const response = await sheets.spreadsheets.values.get({
-      spreadsheetId,
-      range,
+    const response = await fetch(url, {
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Accept': 'application/json',
+      },
     });
 
-    const values = response.data.values;
+    const responseText = await response.text();
+    console.log('Sheets API response status:', response.status);
+
+    if (!response.ok) {
+      console.error('Sheets API error response:', responseText);
+      return NextResponse.json(
+        { error: `API Error (${response.status}): ${responseText}` },
+        { status: response.status }
+      );
+    }
+
+    const data = JSON.parse(responseText);
+    const values = data.values;
 
     if (!values || values.length === 0) {
       return NextResponse.json({ rows: [] });
@@ -58,7 +63,7 @@ export async function GET(request: NextRequest) {
 
     // Transform rows into the expected format
     const rows: SheetRow[] = values
-      .map((row, index) => {
+      .map((row: string[]) => {
         const url = row[0]?.trim() || '';
         const caption = row[1]?.trim() || '';
 
@@ -68,35 +73,16 @@ export async function GET(request: NextRequest) {
         return {
           url,
           caption,
-          eventId: '', // Could add column C for event ID if needed
+          eventId: '',
         };
       })
       .filter((row): row is SheetRow => row !== null);
 
+    console.log('Successfully imported', rows.length, 'rows');
+
     return NextResponse.json({ rows });
   } catch (error: any) {
-    console.error('Sheets API error:', error);
-
-    if (error.response?.status === 401) {
-      return NextResponse.json(
-        { error: 'Access token expired. Please re-authenticate.' },
-        { status: 401 }
-      );
-    }
-
-    if (error.response?.status === 403) {
-      return NextResponse.json(
-        { error: 'Access denied. Please check you have access to this spreadsheet.' },
-        { status: 403 }
-      );
-    }
-
-    if (error.response?.status === 404) {
-      return NextResponse.json(
-        { error: 'Spreadsheet not found. Please check the ID.' },
-        { status: 404 }
-      );
-    }
+    console.error('Sheets fetch error:', error?.message || error);
 
     return NextResponse.json(
       { error: error.message || 'Failed to fetch spreadsheet data' },

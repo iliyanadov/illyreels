@@ -13,7 +13,7 @@ function getGoogleTokensFromUrl() {
   if (accessToken) {
     // Clean URL
     window.history.replaceState({}, '', window.location.pathname);
-    return { accessToken, refreshToken };
+    return { accessToken, refreshToken: refreshToken || undefined };
   }
   return null;
 }
@@ -130,6 +130,7 @@ export default function Home() {
   const [googleToken, setGoogleToken] = useState<{ accessToken: string; refreshToken?: string } | null>(null);
   const [showSheetsModal, setShowSheetsModal] = useState(false);
   const [spreadsheetId, setSpreadsheetId] = useState('');
+  const [sheetName, setSheetName] = useState('Sheet1');
   const [startRow, setStartRow] = useState('4');
   const [endRow, setEndRow] = useState('32');
   const [loadingSheets, setLoadingSheets] = useState(false);
@@ -238,11 +239,24 @@ export default function Home() {
   }
 
   async function fetchAllVideos() {
-    // Fetch all entries that have URLs but no data yet
+    // Fetch all entries that have URLs, captions, but no data yet
     const promises = entries
-      .filter(e => e.url.trim() && !e.data && !e.loading)
+      .filter(e => e.url.trim() && e.caption.trim() && !e.data && !e.loading)
       .map(e => fetchVideo(e.id));
-    
+
+    if (promises.length === 0) {
+      // Show error if no valid entries
+      const entriesWithoutCaption = entries.filter(e => e.url.trim() && !e.caption.trim());
+      if (entriesWithoutCaption.length > 0) {
+        setEntries(entries.map(e =>
+          entriesWithoutCaption.some(ne => ne.id === e.id)
+            ? { ...e, error: 'Caption is required' }
+            : e
+        ));
+      }
+      return;
+    }
+
     await Promise.all(promises);
   }
 
@@ -286,7 +300,7 @@ export default function Home() {
 
     try {
       const res = await fetch(
-        `/api/google/sheets?access_token=${encodeURIComponent(googleToken.accessToken)}&spreadsheet_id=${encodeURIComponent(spreadsheetId.trim())}&start_row=${startRow}&end_row=${endRow}`
+        `/api/google/sheets?access_token=${encodeURIComponent(googleToken.accessToken)}&spreadsheet_id=${encodeURIComponent(spreadsheetId.trim())}&start_row=${startRow}&end_row=${endRow}&sheet_name=${encodeURIComponent(sheetName.trim())}`
       );
 
       const data = await res.json();
@@ -299,7 +313,7 @@ export default function Home() {
 
       // Create new entries from the imported data
       const newEntries = data.rows.map((row: any) => ({
-        id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+        id: Date.now().toString() + Math.random().toString(36).substring(2, 11),
         url: row.url,
         caption: row.caption,
         eventId: row.eventId || '',
@@ -374,6 +388,23 @@ export default function Home() {
       {/* Video Table */}
       <div className="w-full max-w-6xl">
         <div className="rounded-2xl border border-zinc-800 bg-zinc-900 overflow-hidden">
+          {/* Table header toolbar */}
+          <div className="border-b border-zinc-800 px-4 py-3 flex items-center justify-between bg-zinc-900/50">
+            <button
+              onClick={addRow}
+              className="flex items-center gap-1.5 rounded-lg border border-zinc-700 px-3 py-1.5 text-xs font-semibold text-zinc-300 hover:border-zinc-500 transition-colors"
+            >
+              <span className="text-base leading-none">+</span>
+              Add Row
+            </button>
+            <button
+              onClick={fetchAllVideos}
+              disabled={entries.every(e => !e.url.trim() || !e.caption.trim() || e.data || e.loading)}
+              className="rounded-lg bg-[#fe2c55] px-4 py-1.5 text-xs font-semibold text-white hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Fetch All Videos
+            </button>
+          </div>
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
@@ -476,24 +507,6 @@ export default function Home() {
                 ))}
               </tbody>
             </table>
-          </div>
-          
-          {/* Table footer with actions */}
-          <div className="border-t border-zinc-800 px-4 py-3 flex items-center justify-between bg-zinc-900/50">
-            <button
-              onClick={addRow}
-              className="flex items-center gap-1.5 rounded-lg border border-zinc-700 px-3 py-1.5 text-xs font-semibold text-zinc-300 hover:border-zinc-500 transition-colors"
-            >
-              <span className="text-base leading-none">+</span>
-              Add Row
-            </button>
-            <button
-              onClick={fetchAllVideos}
-              disabled={entries.every(e => !e.url.trim() || e.data || e.loading)}
-              className="rounded-lg bg-[#fe2c55] px-4 py-1.5 text-xs font-semibold text-white hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              Fetch All Videos
-            </button>
           </div>
         </div>
 
@@ -598,6 +611,22 @@ export default function Home() {
                 />
                 <p className="mt-1 text-xs text-zinc-500">
                   Find the ID in your sheet URL: /d/{'<span class="text-zinc-400">ID</span>'}/edit
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-zinc-400 mb-2">
+                  Sheet Name
+                </label>
+                <input
+                  type="text"
+                  value={sheetName}
+                  onChange={e => setSheetName(e.target.value)}
+                  placeholder="Sheet1"
+                  className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white placeholder-zinc-500 outline-none focus:border-zinc-600 transition-colors"
+                />
+                <p className="mt-1 text-xs text-zinc-500">
+                  The name of the tab (usually "Sheet1")
                 </p>
               </div>
 
