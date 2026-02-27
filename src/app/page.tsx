@@ -274,6 +274,11 @@ export default function Home() {
                         type="url"
                         value={entry.url}
                         onChange={e => updateEntry(entry.id, 'url', e.target.value)}
+                        onKeyDown={e => {
+                          if ((e.metaKey || e.ctrlKey) && e.key === 'z') {
+                            e.preventDefault();
+                          }
+                        }}
                         placeholder="Paste TikTok URL..."
                         className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white placeholder-zinc-500 outline-none focus:border-[#fe2c55] transition-colors"
                       />
@@ -283,6 +288,11 @@ export default function Home() {
                         type="text"
                         value={entry.caption}
                         onChange={e => updateEntry(entry.id, 'caption', e.target.value)}
+                        onKeyDown={e => {
+                          if ((e.metaKey || e.ctrlKey) && e.key === 'z') {
+                            e.preventDefault();
+                          }
+                        }}
                         placeholder="Optional caption..."
                         className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white placeholder-zinc-500 outline-none focus:border-zinc-600 transition-colors"
                       />
@@ -293,6 +303,11 @@ export default function Home() {
                           type="text"
                           value={entry.eventId}
                           onChange={e => updateEntry(entry.id, 'eventId', e.target.value)}
+                          onKeyDown={e => {
+                            if ((e.metaKey || e.ctrlKey) && e.key === 'z') {
+                              e.preventDefault();
+                            }
+                          }}
                           placeholder="Event ticker..."
                           className="flex-1 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white placeholder-zinc-500 outline-none focus:border-blue-500 transition-colors"
                         />
