@@ -1,8 +1,22 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import Image from 'next/image';
 import { TikTokCanvas, TikTokCanvasRef } from './components/TikTokCanvas';
+
+// Check for Google OAuth tokens in URL on mount
+function getGoogleTokensFromUrl() {
+  if (typeof window === 'undefined') return null;
+  const params = new URLSearchParams(window.location.search);
+  const accessToken = params.get('google_access_token');
+  const refreshToken = params.get('google_refresh_token');
+  if (accessToken) {
+    // Clean URL
+    window.history.replaceState({}, '', window.location.pathname);
+    return { accessToken, refreshToken };
+  }
+  return null;
+}
 
 interface Author {
   uniqueId: string;
@@ -108,9 +122,26 @@ export default function Home() {
   const [entries, setEntries] = useState<VideoEntry[]>([
     { id: '1', url: '', caption: '', eventId: '', data: null, marketData: null, loading: false, loadingMarket: false, error: '', marketError: '' }
   ]);
-  
+
   // Store refs for each canvas to trigger downloads
   const canvasRefsMap = useRef<Map<string, TikTokCanvasRef>>(new Map());
+
+  // Google Sheets state
+  const [googleToken, setGoogleToken] = useState<{ accessToken: string; refreshToken?: string } | null>(null);
+  const [showSheetsModal, setShowSheetsModal] = useState(false);
+  const [spreadsheetId, setSpreadsheetId] = useState('');
+  const [startRow, setStartRow] = useState('4');
+  const [endRow, setEndRow] = useState('32');
+  const [loadingSheets, setLoadingSheets] = useState(false);
+  const [sheetsError, setSheetsError] = useState('');
+
+  // Check for OAuth tokens on mount
+  useEffect(() => {
+    const tokens = getGoogleTokensFromUrl();
+    if (tokens) {
+      setGoogleToken(tokens);
+    }
+  }, []);
 
   function addRow() {
     setEntries([...entries, { 
@@ -218,7 +249,7 @@ export default function Home() {
   async function downloadAll() {
     // Get all entries with fetched video data
     const entriesToDownload = entries.filter(e => e.data && !e.loading && !(e.data.images && e.data.images.length > 0));
-    
+
     // Download each video sequentially, waiting for each to complete
     for (const entry of entriesToDownload) {
       const canvasRef = canvasRefsMap.current.get(entry.id);
@@ -232,6 +263,64 @@ export default function Home() {
           console.error(`Failed to download video ${entry.id}:`, error);
         }
       }
+    }
+  }
+
+  async function connectGoogle() {
+    // Get OAuth URL from our API
+    const res = await fetch('/api/google/auth');
+    const data = await res.json();
+    if (data.authUrl) {
+      window.location.href = data.authUrl;
+    }
+  }
+
+  async function importFromSheets() {
+    if (!googleToken || !spreadsheetId.trim()) {
+      setSheetsError('Please provide a spreadsheet ID');
+      return;
+    }
+
+    setLoadingSheets(true);
+    setSheetsError('');
+
+    try {
+      const res = await fetch(
+        `/api/google/sheets?access_token=${encodeURIComponent(googleToken.accessToken)}&spreadsheet_id=${encodeURIComponent(spreadsheetId.trim())}&start_row=${startRow}&end_row=${endRow}`
+      );
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setSheetsError(data.error || 'Failed to fetch spreadsheet data');
+        setLoadingSheets(false);
+        return;
+      }
+
+      // Create new entries from the imported data
+      const newEntries = data.rows.map((row: any) => ({
+        id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+        url: row.url,
+        caption: row.caption,
+        eventId: row.eventId || '',
+        data: null,
+        marketData: null,
+        loading: false,
+        loadingMarket: false,
+        error: '',
+        marketError: ''
+      }));
+
+      // Replace current entries with imported ones
+      setEntries(newEntries.length > 0 ? newEntries : [
+        { id: '1', url: '', caption: '', eventId: '', data: null, marketData: null, loading: false, loadingMarket: false, error: '', marketError: '' }
+      ]);
+
+      setShowSheetsModal(false);
+    } catch (error) {
+      setSheetsError('Network error — please try again');
+    } finally {
+      setLoadingSheets(false);
     }
   }
 
@@ -249,6 +338,37 @@ export default function Home() {
         <p className="text-zinc-400 text-sm max-w-sm">
           Download TikTok videos &amp; images — with or without watermark
         </p>
+
+        {/* Google Sheets Import */}
+        <div className="mt-6 flex items-center justify-center gap-3">
+          {googleToken ? (
+            <>
+              <span className="text-xs text-green-400">✓ Connected to Google Sheets</span>
+              <button
+                onClick={() => setShowSheetsModal(true)}
+                className="rounded-lg border border-green-700 bg-green-950/20 px-4 py-2 text-xs font-semibold text-green-400 hover:bg-green-950/40 hover:border-green-600 transition-colors"
+              >
+                Import from Sheets
+              </button>
+              <button
+                onClick={() => setGoogleToken(null)}
+                className="rounded-lg border border-zinc-700 px-3 py-2 text-xs font-semibold text-zinc-400 hover:border-red-500 hover:text-red-400 transition-colors"
+              >
+                Disconnect
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={connectGoogle}
+              className="flex items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2 text-xs font-semibold text-zinc-300 hover:border-zinc-500 hover:bg-zinc-700 transition-colors"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M21.98 7.447c.078-.444-.137-.795-.382-1.077-.266-.308-.628-.464-1.021-.464l-6.57.003-2.048-6.095C12.011.346 11.77.174 11.495.174c-.277 0-.518.172-.564.64L8.882 6.91l-6.57.003c-.394 0-.755.156-1.021.464-.245.282-.46.633-.382 1.077l2.13 6.326-5.477 4.364c-.27.215-.384.528-.303.85.078.31.309.564.637.681l6.354 2.22 2.042 6.076c.085.25.29.419.527.419.236 0 .44-.17.527-.42l2.042-6.075 6.354-2.22c.328-.117.56-.372.637-.682.081-.322-.033-.635-.303-.85l-5.477-4.364 2.13-6.326zM11.495 18.17l-1.63 4.846-1.63-4.846-5.083-1.776 4.38-3.493-1.708-5.074h5.241v-.002l.001.002 1.63-4.846 1.629 4.846h5.241l-1.708 5.074 4.38 3.493-5.083 1.776z"/>
+              </svg>
+              Connect Google Sheets
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Video Table */}
@@ -446,6 +566,91 @@ export default function Home() {
       <p className="mt-8 text-xs text-zinc-600 text-center max-w-sm">
         For personal use only. Respect TikTok&apos;s terms of service and content creators&apos; rights.
       </p>
+
+      {/* Google Sheets Import Modal */}
+      {showSheetsModal && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+          <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6 w-full max-w-md">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold">Import from Google Sheets</h2>
+              <button
+                onClick={() => setShowSheetsModal(false)}
+                className="text-zinc-400 hover:text-white transition-colors"
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="18" y1="6" x2="6" y2="18"/>
+                  <line x1="6" y1="6" x2="18" y2="18"/>
+                </svg>
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-zinc-400 mb-2">
+                  Spreadsheet ID
+                </label>
+                <input
+                  type="text"
+                  value={spreadsheetId}
+                  onChange={e => setSpreadsheetId(e.target.value)}
+                  placeholder="From URL: /d/SPREADSHEET_ID/edit"
+                  className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white placeholder-zinc-500 outline-none focus:border-zinc-600 transition-colors"
+                />
+                <p className="mt-1 text-xs text-zinc-500">
+                  Find the ID in your sheet URL: /d/{'<span class="text-zinc-400">ID</span>'}/edit
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-zinc-400 mb-2">
+                    Start Row
+                  </label>
+                  <input
+                    type="number"
+                    value={startRow}
+                    onChange={e => setStartRow(e.target.value)}
+                    min="1"
+                    className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white outline-none focus:border-zinc-600 transition-colors"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-zinc-400 mb-2">
+                    End Row
+                  </label>
+                  <input
+                    type="number"
+                    value={endRow}
+                    onChange={e => setEndRow(e.target.value)}
+                    min="1"
+                    className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white outline-none focus:border-zinc-600 transition-colors"
+                  />
+                </div>
+              </div>
+
+              <div className="bg-zinc-800/50 rounded-lg px-3 py-2 text-xs text-zinc-400">
+                <p className="font-medium text-zinc-300 mb-1">Expected format:</p>
+                <p>• Column A: TikTok/Instagram URL</p>
+                <p>• Column B: Caption</p>
+              </div>
+
+              {sheetsError && (
+                <div className="rounded-lg border border-red-800 bg-red-950/50 px-3 py-2 text-xs text-red-400">
+                  {sheetsError}
+                </div>
+              )}
+
+              <button
+                onClick={importFromSheets}
+                disabled={loadingSheets || !spreadsheetId.trim()}
+                className="w-full rounded-lg bg-green-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-green-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {loadingSheets ? 'Importing...' : 'Import Rows'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );
