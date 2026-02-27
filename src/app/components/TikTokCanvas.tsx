@@ -417,7 +417,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
           : BASE_HEADER_HEIGHT;
 
         // Header: fixed X, but Y follows the crop box
-        const headerY = Math.max(0, y - headerHeight);
+        const headerY = Math.max(0, y - headerHeight + 8);  // 8px overlap with crop box
         drawHeader(0, headerY, CANVAS_W);
 
         const vw = video.videoWidth;
