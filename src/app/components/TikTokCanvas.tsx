@@ -5,6 +5,8 @@ import { useRef, useEffect, useState, forwardRef, useImperativeHandle } from 're
 // Internal canvas resolution (1080p portrait for highest export quality)
 export const CANVAS_W = 1080;
 export const CANVAS_H = 1920;
+// Target width for video fitting (1000px leaves 40px padding on each side)
+export const VIDEO_TARGET_W = 1000;
 // Display scale so the on-screen canvas isn't huge
 const DISPLAY_SCALE = 0.25; // 1080×1920 → 270×480 on screen
 const MIN_DIM = 40;
@@ -349,7 +351,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
 
         const vw = video.videoWidth;
         const vh = video.videoHeight;
-        const scale = Math.max(CANVAS_W / vw, CANVAS_H / vh) * videoScaleRef.current;
+        const scale = Math.min(VIDEO_TARGET_W / vw, CANVAS_H / vh) * videoScaleRef.current;
         const drawW = vw * scale;
         const drawH = vh * scale;
         const dx = (CANVAS_W - drawW) / 2 + ox;

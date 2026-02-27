@@ -3,38 +3,6 @@ import { NextRequest, NextResponse } from 'next/server';
 // Force Node.js runtime for CommonJS dependencies
 export const runtime = 'nodejs';
 
-// Type definitions for the libraries
-type TikTokDownloader = (url: string, options?: { version?: string }) => Promise<{
-  status: string;
-  result?: {
-    videoHD?: string;
-    video?: string;
-    audio?: string;
-    desc?: string;
-    author?: {
-      nickname: string;
-      uniqueId: string;
-      avatarThumb?: string;
-    };
-    cover?: string;
-    duration?: number;
-    size?: number;
-    id?: string;
-    images?: string[];
-  };
-  message?: string;
-}>;
-
-type InstagramDownloader = (url: string) => Promise<{
-  result?: Array<{
-    url: string;
-    filename?: string;
-    thumbnail?: string;
-    type?: string;
-  }>;
-  error?: string;
-}>;
-
 function isTikTokUrl(url: string): boolean {
   return /tiktok\.com/i.test(url) || /vm\.tiktok\.com/i.test(url);
 }
@@ -47,15 +15,31 @@ async function resolveShortUrl(url: string): Promise<string> {
   // Follow redirects for short URLs
   if (url.includes('vm.tiktok.com') || url.includes('vt.tiktok.com')) {
     try {
-      const response = await fetch(url, { redirect: 'manual' });
+      const response = await fetch(url, {
+        redirect: 'manual',
+        headers: { 'User-Agent': 'Mozilla/5.0' }
+      });
       const location = response.headers.get('location');
-      if (location) return location;
-    } catch {
-      // If redirect fails, return original URL
+      if (location) {
+        console.log('Resolved short URL:', url, '→', location);
+        return location;
+      }
+    } catch (e) {
+      console.error('Failed to resolve short URL:', e);
     }
   }
   return url;
 }
+
+type InstagramDownloader = (url: string) => Promise<{
+  result?: Array<{
+    url: string;
+    filename?: string;
+    thumbnail?: string;
+    type?: string;
+  }>;
+  error?: string;
+}>;
 
 export async function POST(request: NextRequest) {
   let url: string;
@@ -78,33 +62,26 @@ export async function POST(request: NextRequest) {
       // Resolve short URL first
       const resolvedUrl = await resolveShortUrl(trimmedUrl);
 
-      // Dynamic import for CommonJS module
-      const { Downloader } = await import('@tobyg74/tiktok-api-dl');
-      const data = await Downloader(resolvedUrl, { version: 'v3' }) as Awaited<ReturnType<TikTokDownloader>>;
+      // Use tikwm.com API for TikTok (more reliable)
+      const form = new URLSearchParams({ url: resolvedUrl, hd: '1' });
 
-      if (data.status !== 'success' || !data.result) {
-        return NextResponse.json({ error: data.message || 'Failed to fetch TikTok video' }, { status: 400 });
+      const res = await fetch('https://www.tikwm.com/api/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: form.toString(),
+      });
+
+      if (!res.ok) {
+        return NextResponse.json({ error: 'Upstream service error' }, { status: 502 });
       }
 
-      // Transform response to match the expected format
-      const result = {
-        id: data.result.id || '',
-        title: data.result.desc || '',
-        cover: data.result.cover || '',
-        author: {
-          uniqueId: data.result.author?.uniqueId || '',
-          nickname: data.result.author?.nickname || '',
-          avatarThumb: data.result.author?.avatarThumb || '',
-        },
-        play: data.result.video || '',
-        wmplay: data.result.video || '',
-        hdplay: data.result.videoHD || data.result.video || '',
-        duration: data.result.duration || 0,
-        size: data.result.size || 0,
-        images: data.result.images || undefined,
-      };
+      const json = await res.json();
 
-      return NextResponse.json(result);
+      if (json.code !== 0) {
+        return NextResponse.json({ error: json.msg || 'Failed to fetch TikTok video' }, { status: 400 });
+      }
+
+      return NextResponse.json(json.data);
     }
 
     if (isInstagramUrl(trimmedUrl)) {
@@ -117,7 +94,7 @@ export async function POST(request: NextRequest) {
       }
 
       const firstResult = data.result[0];
-      // Transform response to match the expected format (for Instagram reels)
+      // Transform response to match the expected format
       const result = {
         id: Date.now().toString(),
         title: '',

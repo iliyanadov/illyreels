@@ -12,6 +12,7 @@
     "@tobyg74/tiktok-api-dl": "^1.3.7",
     "btch-downloader": "^6.0.25",
     "next": "16.1.6",
+    "probe-image-size": "^7.2.3",
     "react": "19.2.3",
     "react-dom": "19.2.3"
   },

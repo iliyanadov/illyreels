@@ -5,6 +5,7 @@ const ALLOWED_HOSTS = [
   'tiktokcdn.com',
   'tiktokv.com',
   'tiktokcdn-us.com',
+  'tokcdn.com',
   'muscdn.app',
   'fastdl.muscdn.app',
   'rapidcdn.app',
