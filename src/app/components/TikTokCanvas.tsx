@@ -773,6 +773,62 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     setVideoScale(1);
   }
 
+  function centerEverything() {
+    // Calculate header height
+    let headerHeight = BASE_HEADER_HEIGHT;
+    if (overlayCaption) {
+      // Roughly estimate caption lines (same logic as draw loop)
+      const captionFont = '400 38px system-ui, sans-serif';
+      const maxWidth = CANVAS_W - (HEADER_PADDING_X + 30) * 2;
+      const words = overlayCaption.split(' ');
+      let line = '';
+      let captionLines = 1;
+      for (let i = 0; i < words.length; i++) {
+        const testLine = line + words[i] + ' ';
+        // This is an approximation - we can't measure text without canvas context
+        if (testLine.length > 40) { // rough estimate
+          captionLines++;
+          line = words[i] + ' ';
+        } else {
+          line = testLine;
+        }
+      }
+      headerHeight = BASE_HEADER_HEIGHT + CAPTION_TOP_PADDING + (captionLines * CAPTION_LINE_HEIGHT);
+    }
+
+    const currentBox = boxRef.current;
+    const oldY = currentBox.y;
+    const cropBoxHeight = currentBox.h;
+
+    // Market box height (if present)
+    const hasMarketBox = eventId?.trim() && marketData && marketData.markets && marketData.markets.length > 0;
+    const marketBoxHeight = hasMarketBox ? 140 + 30 : 0; // 140 box height + 30px gap
+
+    // Total content height
+    const totalHeight = headerHeight + cropBoxHeight + marketBoxHeight;
+
+    // Calculate starting Y to center everything on canvas
+    const startY = (CANVAS_H - totalHeight) / 2;
+
+    // Header is positioned at startY (drawn above crop box)
+    // Crop box Y = startY + headerHeight
+    const newY = startY + headerHeight;
+
+    // Calculate how much the crop box moved
+    const deltaY = newY - oldY;
+
+    // Update crop box position (keep width and x position)
+    const b = { x: currentBox.x, y: newY, w: currentBox.w, h: currentBox.h };
+    boxRef.current = b;
+    setBox({ ...b });
+
+    // Move video with the crop box (maintain relative position)
+    videoOffsetRef.current = {
+      x: videoOffsetRef.current.x,
+      y: videoOffsetRef.current.y + deltaY
+    };
+  }
+
   function togglePlay() {
     const v = videoRef.current;
     if (!v) return;
@@ -1050,6 +1106,13 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
           className="text-zinc-500 hover:text-zinc-300 underline underline-offset-2 transition-colors"
         >
           Reset
+        </button>
+        <span>·</span>
+        <button
+          onClick={centerEverything}
+          className="text-zinc-500 hover:text-zinc-300 underline underline-offset-2 transition-colors"
+        >
+          Center
         </button>
       </div>
 
