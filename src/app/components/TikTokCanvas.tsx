@@ -1090,7 +1090,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
       </div>
 
       {/* Info row */}
-      <div className="flex items-center gap-2 text-xs text-zinc-600">
+      <div className="flex items-center gap-1.5 text-[10px] text-zinc-600">
         <span>{Math.round(box.w)}×{Math.round(box.h)}</span>
         <span>at ({Math.round(box.x)}, {Math.round(box.y)})</span>
         <span>·</span>
