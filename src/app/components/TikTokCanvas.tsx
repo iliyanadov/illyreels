@@ -200,7 +200,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     let active = true;
 
     function drawHeader(cx: number, cy: number, cw: number) {
-      const padX = HEADER_PADDING_X + 30; // Shift right by 30px
+      const padX = HEADER_PADDING_X + 43; // Shift right by 43px
       const padY = HEADER_PADDING_TOP;
       const lineH = 50;
       const nameFont = '600 44px system-ui, sans-serif';
