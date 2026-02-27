@@ -172,8 +172,14 @@ export default function Home() {
   async function fetchVideo(id: string) {
     const entry = entries.find(e => e.id === id);
     if (!entry || !entry.url.trim()) return;
+    if (!entry.caption.trim()) {
+      setEntries(entries.map(e =>
+        e.id === id ? { ...e, error: 'Caption is required' } : e
+      ));
+      return;
+    }
 
-    setEntries(entries.map(e => 
+    setEntries(entries.map(e =>
       e.id === id ? { ...e, loading: true, error: '', data: null } : e
     ));
 
@@ -293,8 +299,9 @@ export default function Home() {
                             e.preventDefault();
                           }
                         }}
-                        placeholder="Optional caption..."
-                        className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white placeholder-zinc-500 outline-none focus:border-zinc-600 transition-colors"
+                        disabled={entry.data !== null}
+                        placeholder="Caption (required)..."
+                        className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white placeholder-zinc-500 outline-none focus:border-zinc-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                       />
                     </td>
                     <td className="px-4 py-3">
