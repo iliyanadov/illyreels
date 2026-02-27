@@ -501,10 +501,10 @@ export default function Home() {
                       <div className="flex items-center justify-center gap-2">
                         <button
                           onClick={() => fetchVideo(entry.id)}
-                          disabled={entry.loading || !entry.url.trim()}
+                          disabled={entry.loading || !entry.url.trim() || !!entry.data}
                           className="rounded-lg bg-[#fe2c55] px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
                         >
-                          {entry.loading ? '...' : 'Fetch'}
+                          {entry.data ? '✓ Fetched' : entry.loading ? '...' : 'Fetch'}
                         </button>
                         {entries.length > 1 && (
                           <button
