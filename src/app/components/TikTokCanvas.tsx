@@ -1033,9 +1033,22 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
       <video
         ref={videoRef}
         src={videoSrc}
+        crossOrigin="anonymous"
         loop muted playsInline
         onPlay={() => setIsPlaying(true)}
         onPause={() => setIsPlaying(false)}
+        onLoadedMetadata={() => {
+          // Auto-play when loaded to ensure canvas can draw
+          const v = videoRef.current;
+          if (v && v.readyState >= 2) {
+            v.play().catch(() => {
+              // Ignore autoplay errors
+            });
+          }
+        }}
+        onError={(e) => {
+          console.error('Video error:', e);
+        }}
         style={{ display: 'none' }}
       />
     </div>
