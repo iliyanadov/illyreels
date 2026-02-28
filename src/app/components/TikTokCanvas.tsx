@@ -121,6 +121,10 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
   const logoImgRef = useRef<HTMLImageElement | null>(null);
   // Cached image for the Sonotrade banner
   const bannerImgRef = useRef<HTMLImageElement | null>(null);
+  // Cached image for the market/event
+  const marketImgRef = useRef<HTMLImageElement | null>(null);
+  // Track if market image has been loaded
+  const marketImgLoadedRef = useRef(false);
 
   // Pan offset for the underlying video (dragging moves the video, not the crop box)
   const videoOffsetRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -263,6 +267,33 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
       video.removeEventListener('error', handleError);
     };
   }, [videoSrc]);
+
+  // ── Load market image when marketData changes (outside draw loop) ─────────────
+  useEffect(() => {
+    if (!marketData?.imageUrl) {
+      marketImgLoadedRef.current = false;
+      return;
+    }
+
+    // Reset loaded state
+    marketImgLoadedRef.current = false;
+
+    // Create new image if not exists or URL changed
+    if (!marketImgRef.current || marketImgRef.current.src !== marketData.imageUrl) {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.src = marketData.imageUrl;
+
+      img.onload = () => {
+        marketImgLoadedRef.current = true;
+        // Trigger one redraw to show the image
+      };
+
+      marketImgRef.current = img;
+    } else if (marketImgRef.current.complete) {
+      marketImgLoadedRef.current = true;
+    }
+  }, [marketData?.imageUrl]);
 
   // ── Helper: Count caption lines accurately ───────────────────────────────────
   function countCaptionLines(canvasCtx: CanvasRenderingContext2D): number {
@@ -491,7 +522,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
           : BASE_HEADER_HEIGHT;
 
         // Header: fixed X, but Y follows the crop box
-        const headerY = Math.max(0, y - headerHeight + 8);  // 8px overlap with crop box
+        const headerY = Math.max(0, y - headerHeight + 16);  // 16px overlap with crop box
         drawHeader(0, headerY, CANVAS_W);
 
         const vw = video.videoWidth;
@@ -545,49 +576,36 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
           const imageSize = 80; // Increased square image size
           const imageMargin = 25; // Increased gap between image and text
           
-          // Load and draw market image if available
+          // Draw market image if available (using pre-loaded image)
           let textStartX = boxX + textPadding;
-          if (marketData.imageUrl) {
-            const img = new Image();
-            img.crossOrigin = 'anonymous';
-            img.src = marketData.imageUrl;
-            
-            // Only draw if image is loaded
-            if (img.complete && img.naturalWidth > 0) {
-              const imgX = boxX + textPadding;
-              const imgY = boxY + (boxHeight - imageSize) / 2; // Vertically center
-              
-              // Draw rounded rectangle clip for image
-              ctx.save();
-              ctx.beginPath();
-              const imgRadius = 12; // Increased corner radius to match rectangle
-              ctx.moveTo(imgX + imgRadius, imgY);
-              ctx.lineTo(imgX + imageSize - imgRadius, imgY);
-              ctx.quadraticCurveTo(imgX + imageSize, imgY, imgX + imageSize, imgY + imgRadius);
-              ctx.lineTo(imgX + imageSize, imgY + imageSize - imgRadius);
-              ctx.quadraticCurveTo(imgX + imageSize, imgY + imageSize, imgX + imageSize - imgRadius, imgY + imageSize);
-              ctx.lineTo(imgX + imgRadius, imgY + imageSize);
-              ctx.quadraticCurveTo(imgX, imgY + imageSize, imgX, imgY + imageSize - imgRadius);
-              ctx.lineTo(imgX, imgY + imgRadius);
-              ctx.quadraticCurveTo(imgX, imgY, imgX + imgRadius, imgY);
-              ctx.closePath();
-              ctx.clip();
-              
-              ctx.drawImage(img, imgX, imgY, imageSize, imageSize);
-              ctx.restore();
-              
-              textStartX = imgX + imageSize + imageMargin;
-            } else {
-              // If image not loaded yet, trigger redraw when it loads
-              img.onload = () => {
-                draw();
-              };
-            }
+          if (marketImgRef.current && marketImgLoadedRef.current) {
+            const img = marketImgRef.current;
+            const imgX = boxX + textPadding;
+            const imgY = boxY + (boxHeight - imageSize) / 2; // Vertically center
+
+            // Draw rounded rectangle clip for image
+            ctx.save();
+            ctx.beginPath();
+            const imgRadius = 12; // Increased corner radius to match rectangle
+            ctx.moveTo(imgX + imgRadius, imgY);
+            ctx.lineTo(imgX + imageSize - imgRadius, imgY);
+            ctx.quadraticCurveTo(imgX + imageSize, imgY, imgX + imageSize, imgY + imgRadius);
+            ctx.lineTo(imgX + imageSize, imgY + imageSize - imgRadius);
+            ctx.quadraticCurveTo(imgX + imageSize, imgY + imageSize, imgX + imageSize - imgRadius, imgY + imageSize);
+            ctx.lineTo(imgX + imgRadius, imgY + imageSize);
+            ctx.quadraticCurveTo(imgX, imgY + imageSize, imgX, imgY + imageSize - imgRadius);
+            ctx.lineTo(imgX, imgY + imgRadius);
+            ctx.quadraticCurveTo(imgX, imgY, imgX + imgRadius, imgY);
+            ctx.closePath();
+            ctx.clip();
+
+            ctx.drawImage(img, imgX, imgY, imageSize, imageSize);
+            ctx.restore();
+
+            textStartX = imgX + imageSize + imageMargin;
           }
           
           // Calculate max width for text (leave space for odds and banner on right)
-          const bannerReservedWidth = 240; // Space reserved for banner column
-          const oddsReservedWidth = 150; // Space reserved for odds column
           const maxTextWidth = 420; // Reduced from 450 to make title area slightly narrower
           
           // Event title (white text) - automatically wrap to 1 or 2 rows as needed
@@ -638,7 +656,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
           
           // Draw odds (yesBid) on the right side if available
           if (market.yesBid) {
-            // Use the same bannerReservedWidth from above
+            const bannerReservedWidth = 240; // Space reserved for banner column
             const oddsColumnEnd = boxX + boxWidth - textPadding - bannerReservedWidth;
             
             // Convert decimal to percentage (0.01 -> 1%)
