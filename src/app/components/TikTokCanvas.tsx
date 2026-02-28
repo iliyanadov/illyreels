@@ -920,7 +920,8 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
       for (const t of candidates) {
         if (MediaRecorder.isTypeSupported(t)) { mimeType = t; break; }
       }
-      const fileExt = mimeType.includes('mp4') ? 'mp4' : 'webm';
+      // Always use .mp4 extension (browser may record as webm internally)
+      const fileExt = 'mp4';
 
       // Capture video stream from canvas
       const canvasStream = canvas.captureStream(30);
