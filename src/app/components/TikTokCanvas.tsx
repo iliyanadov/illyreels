@@ -613,49 +613,67 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
           // Calculate max width for text (leave space for odds and banner on right)
           const maxTextWidth = 420; // Reduced from 450 to make title area slightly narrower
           
-          // Event title (white text) - automatically wrap to 1 or 2 rows as needed
+          // Event title (white text) - max 2 lines with ellipsis for truncation
           ctx.font = '600 28px system-ui, sans-serif'; // Increased from 26px to 28px
           ctx.fillStyle = 'rgb(231, 233, 234)';
           ctx.textAlign = 'left'; // Ensure left alignment for title
-          
-          // Check if text fits in one line
+
           const fullText = marketData.title;
           const fullTextWidth = ctx.measureText(fullText).width;
-          
+          const ellipsis = '...';
+          const ellipsisWidth = ctx.measureText(ellipsis).width;
+
           if (fullTextWidth <= maxTextWidth) {
             // Text fits in one line - center it vertically
             const textY = boxY + boxHeight / 2 + 8; // Vertically centered
             ctx.fillText(fullText, textStartX, textY);
           } else {
-            // Text needs wrapping - split into two rows
+            // Text needs wrapping - split into two rows max, with truncation
             const lineHeight = 34; // Increased from 30px to 34px for more spacing
             const totalTextHeight = lineHeight * 2; // Two lines
             const textY = boxY + (boxHeight - totalTextHeight) / 2 + 24; // Center the two-line block
             const words = fullText.split(' ');
             let line1 = '';
             let line2 = '';
-            let currentLine = 1;
-            
+
             for (const word of words) {
-              const testLine = (currentLine === 1 ? line1 : line2) + (currentLine === 1 && line1 ? ' ' : currentLine === 2 && line2 ? ' ' : '') + word;
-              const metrics = ctx.measureText(testLine);
-              
-              if (metrics.width > maxTextWidth && (currentLine === 1 ? line1 : line2)) {
-                currentLine = 2;
-                line2 = word;
+              // Try adding to line 1
+              const testLine1 = line1 + (line1 ? ' ' : '') + word;
+              const line1Width = ctx.measureText(testLine1).width;
+
+              if (line1Width <= maxTextWidth) {
+                line1 = testLine1;
               } else {
-                if (currentLine === 1) {
-                  line1 = testLine;
+                // Line 1 is full, add to line 2
+                const testLine2 = line2 + (line2 ? ' ' : '') + word;
+                const line2Width = ctx.measureText(testLine2).width;
+
+                if (line2Width <= maxTextWidth - ellipsisWidth) {
+                  line2 = testLine2;
                 } else {
-                  line2 = testLine;
+                  // Line 2 is also full - truncate with ellipsis
+                  break;
                 }
               }
             }
-            
-            // Draw the two lines
+
+            // Draw the lines (line2 may have ellipsis)
             ctx.fillText(line1, textStartX, textY);
             if (line2) {
-              ctx.fillText(line2, textStartX, textY + 34); // Use updated lineHeight for spacing
+              ctx.fillText(line2, textStartX, textY + 34);
+            } else {
+              // Only one line, add ellipsis if truncated
+              const truncatedWidth = ctx.measureText(line1).width;
+              if (truncatedWidth > maxTextWidth - ellipsisWidth) {
+                // Truncate line1 and add ellipsis
+                let truncatedLine = line1;
+                while (ctx.measureText(truncatedLine + ellipsis).width > maxTextWidth) {
+                  truncatedLine = truncatedLine.slice(0, -1);
+                }
+                ctx.fillText(truncatedLine + ellipsis, textStartX, textY);
+              } else {
+                ctx.fillText(line1, textStartX, textY);
+              }
             }
           }
           
