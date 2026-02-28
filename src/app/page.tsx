@@ -97,6 +97,7 @@ interface VideoEntry {
   loadingMarket: boolean;
   error: string;
   marketError: string;
+  videoFailed: boolean; // Track if video failed to load in canvas
 }
 
 function formatBytes(bytes: number): string {
@@ -120,7 +121,7 @@ function formatDuration(seconds: number): string {
 
 export default function Home() {
   const [entries, setEntries] = useState<VideoEntry[]>([
-    { id: '1', url: '', caption: '', eventId: '', data: null, marketData: null, loading: false, loadingMarket: false, error: '', marketError: '' }
+    { id: '1', url: '', caption: '', eventId: '', data: null, marketData: null, loading: false, loadingMarket: false, error: '', marketError: '', videoFailed: false }
   ]);
 
   // Store refs for each canvas to trigger downloads
@@ -166,8 +167,14 @@ export default function Home() {
 
   function resetEverything() {
     setEntries([
-      { id: '1', url: '', caption: '', eventId: '', data: null, marketData: null, loading: false, loadingMarket: false, error: '', marketError: '' }
+      { id: '1', url: '', caption: '', eventId: '', data: null, marketData: null, loading: false, loadingMarket: false, error: '', marketError: '', videoFailed: false }
     ]);
+  }
+
+  function handleVideoError(id: string) {
+    setEntries(prev => prev.map(e =>
+      e.id === id ? { ...e, videoFailed: true } : e
+    ));
   }
 
   function updateEntry(id: string, field: 'url' | 'caption' | 'eventId', value: string) {
@@ -233,7 +240,7 @@ export default function Home() {
 
     // Set loading state
     setEntries(prev => prev.map(e =>
-      e.id === id ? { ...e, loading: true, error: '', data: null } : e
+      e.id === id ? { ...e, loading: true, error: '', data: null, videoFailed: false } : e
     ));
 
     try {
@@ -250,7 +257,8 @@ export default function Home() {
           ...e,
           loading: false,
           error: res.ok ? '' : (json.error || 'Something went wrong'),
-          data: res.ok ? json : null
+          data: res.ok ? json : null,
+          videoFailed: false
         } : e
       ));
     } catch (err) {
@@ -355,7 +363,7 @@ export default function Home() {
 
       // Replace current entries with imported ones
       setEntries(newEntries.length > 0 ? newEntries : [
-        { id: '1', url: '', caption: '', eventId: '', data: null, marketData: null, loading: false, loadingMarket: false, error: '', marketError: '' }
+        { id: '1', url: '', caption: '', eventId: '', data: null, marketData: null, loading: false, loadingMarket: false, error: '', marketError: '', videoFailed: false }
       ]);
 
       setShowSheetsModal(false);
@@ -529,10 +537,10 @@ export default function Home() {
                       <div className="flex items-center justify-center gap-2">
                         <button
                           onClick={() => fetchVideo(entry.id)}
-                          disabled={entry.loading || !entry.url.trim() || !!entry.data}
+                          disabled={entry.loading || !entry.url.trim() || (!!entry.data && !entry.videoFailed)}
                           className="rounded-lg bg-[#fe2c55] px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
                         >
-                          {entry.data ? '✓ Fetched' : entry.loading ? '...' : 'Fetch'}
+                          {entry.videoFailed ? 'Retry' : entry.data ? '✓ Fetched' : entry.loading ? '...' : 'Fetch'}
                         </button>
                         {entries.length > 1 && (
                           <button
@@ -600,6 +608,7 @@ export default function Home() {
                     videoSrc={proxyStreamUrl(entry.data!.hdplay || entry.data!.play || entry.data!.wmplay)}
                     videoId={entry.data!.id}
                     rowNumber={rowIndex}
+                    onVideoError={() => handleVideoError(entry.id)}
                     overlayCaption={entry.caption}
                     eventId={entry.eventId}
                     marketData={entry.marketData}

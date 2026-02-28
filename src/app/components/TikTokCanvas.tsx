@@ -84,6 +84,7 @@ interface Props {
   videoSrc: string;
   videoId?: string;
   rowNumber?: number; // Row number for ordered exports
+  onVideoError?: () => void; // Callback when video fails to load
   overlayDisplayName?: string;
   overlayHandle?: string;
   overlayDate?: string;
@@ -101,6 +102,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
   videoSrc,
   videoId,
   rowNumber = 0,
+  onVideoError,
   overlayDisplayName = 'Sonotrade',
   overlayHandle = '@SonotradeHQ',
   overlayDate = 'Jan 22',
@@ -129,6 +131,8 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
 
   // Playback state for template preview
   const [isPlaying, setIsPlaying] = useState(false);
+  // Video error state
+  const [videoError, setVideoError] = useState<string | null>(null);
 
   // Box lives in both a ref (for the draw loop) and state (for handle positions)
   const boxRef = useRef<Box>({ x: 0, y: 0, w: CANVAS_W, h: CANVAS_H });
@@ -167,6 +171,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     const handleLoadedMetadata = () => {
       const vw = video.videoWidth;
       const vh = video.videoHeight;
+      console.log('Video loaded successfully:', { videoId, vw, vh, src: videoSrc });
       if (vw && vh) {
         // Calculate scale to fit video to VIDEO_TARGET_W width
         const scale = Math.min(VIDEO_TARGET_W / vw, CANVAS_H / vh);
@@ -190,6 +195,31 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     return () => {
       video.removeEventListener('loadedmetadata', handleLoadedMetadata);
     };
+  }, [videoSrc]);
+
+  // Clear video error when videoSrc changes
+  useEffect(() => {
+    console.log('Video source changed:', { videoId, videoSrc });
+    setVideoError(null);
+
+    // Set a timeout to detect videos that never load
+    const timeoutId = setTimeout(() => {
+      const video = videoRef.current;
+      if (video && video.readyState < 2 && !videoError) {
+        // Video hasn't loaded after 10 seconds
+        console.error('Video loading timeout:', {
+          src: videoSrc,
+          readyState: video.readyState,
+          networkState: video.networkState
+        });
+        setVideoError('Video failed to load. The video URL may be invalid.');
+        if (onVideoError) {
+          onVideoError();
+        }
+      }
+    }, 10000);
+
+    return () => clearTimeout(timeoutId);
   }, [videoSrc]);
 
   // ── Helper: Count caption lines accurately ───────────────────────────────────
@@ -1076,6 +1106,24 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
           className="block rounded-2xl border border-zinc-700 shadow-[0_0_48px_rgba(254,44,85,0.1)]"
         />
 
+        {/* Video error overlay */}
+        {videoError && (
+          <div
+            className="absolute inset-0 flex items-center justify-center bg-black/80 rounded-2xl"
+            style={{ width: CANVAS_W * DISPLAY_SCALE, height: CANVAS_H * DISPLAY_SCALE }}
+          >
+            <div className="text-center px-4">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-red-400 mx-auto mb-2">
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="12" y1="8" x2="12" y2="12"/>
+                <line x1="12" y1="16" x2="12.01" y2="16"/>
+              </svg>
+              <p className="text-red-400 text-sm font-medium">{videoError}</p>
+              <p className="text-zinc-500 text-xs mt-1">Try fetching the video again</p>
+            </div>
+          </div>
+        )}
+
         {/* Handle overlay — sits on top of canvas, overflows freely */}
         <div className="absolute inset-0 pointer-events-none" style={{ overflow: 'visible' }}>
 
@@ -1205,7 +1253,43 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
           }
         }}
         onError={(e) => {
-          console.error('Video error:', e);
+          const video = e.target as HTMLVideoElement;
+          const errorCode = video.error?.code;
+          const errorMessage = video.error?.message;
+          const errorDetails = {
+            code: errorCode,
+            message: errorMessage,
+            src: videoSrc,
+            networkState: video.networkState,
+            readyState: video.readyState,
+            currentSrc: video.currentSrc,
+            error: video.error
+          };
+          console.error('Video error:', errorDetails);
+
+          // If error code is undefined but error was triggered, it might be a loading issue
+          if (errorCode === undefined) {
+            setVideoError('Video failed to load. The video URL may be invalid.');
+            if (onVideoError) {
+              onVideoError();
+            }
+            return;
+          }
+
+          // Set user-friendly error message
+          if (errorCode === 4) {
+            setVideoError('Video format not supported. Try refreshing the page.');
+          } else if (errorCode === 3) {
+            setVideoError('Video decode error. The file may be corrupted.');
+          } else if (errorCode === 2) {
+            setVideoError('Network error. Check your internet connection.');
+          } else {
+            setVideoError('Failed to load video. The link may be invalid.');
+          }
+          // Notify parent component so they can re-enable fetch button
+          if (onVideoError) {
+            onVideoError();
+          }
         }}
         style={{ display: 'none' }}
       />
