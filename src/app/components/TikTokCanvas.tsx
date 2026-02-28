@@ -12,14 +12,13 @@ const DISPLAY_SCALE = 0.25; // 1080×1920 → 270×480 on screen
 const MIN_DIM = 40;
 const H_SIZE = 10; // handle square side length
 
-type Handle = 'tl' | 'tc' | 'tr' | 'ml' | 'mr' | 'bl' | 'bc' | 'br' | 'move';
+type Handle = 'tl' | 'tc' | 'tr' | 'bl' | 'bc' | 'br' | 'move';
 
 interface Box { x: number; y: number; w: number; h: number }
 
 const CURSORS: Record<Handle, string> = {
-  tl: 'nw-resize', tc: 'n-resize',  tr: 'ne-resize',
-  ml: 'w-resize',                    mr: 'e-resize',
-  bl: 'sw-resize', bc: 's-resize',  br: 'se-resize',
+  tl: 'n-resize', tc: 'n-resize',  tr: 'n-resize',
+  bl: 's-resize', bc: 's-resize',  br: 's-resize',
   move: 'move',
 };
 
@@ -857,21 +856,17 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
 
       switch (h) {
         case 'br':
-          nw = Math.max(MIN_DIM, sb.w + dx); nh = Math.max(MIN_DIM, sb.h + dy); break;
+          nh = Math.max(MIN_DIM, sb.h + dy); break;
         case 'bl':
-          nw = Math.max(MIN_DIM, sb.w - dx); nx = sb.x + sb.w - nw; nh = Math.max(MIN_DIM, sb.h + dy); break;
+          nh = Math.max(MIN_DIM, sb.h + dy); break;
         case 'tr':
-          nw = Math.max(MIN_DIM, sb.w + dx); nh = Math.max(MIN_DIM, sb.h - dy); ny = sb.y + sb.h - nh; break;
+          nh = Math.max(MIN_DIM, sb.h - dy); ny = sb.y + sb.h - nh; break;
         case 'tl':
-          nw = Math.max(MIN_DIM, sb.w - dx); nx = sb.x + sb.w - nw; nh = Math.max(MIN_DIM, sb.h - dy); ny = sb.y + sb.h - nh; break;
+          nh = Math.max(MIN_DIM, sb.h - dy); ny = sb.y + sb.h - nh; break;
         case 'tc':
           nh = Math.max(MIN_DIM, sb.h - dy); ny = sb.y + sb.h - nh; break;
         case 'bc':
           nh = Math.max(MIN_DIM, sb.h + dy); break;
-        case 'ml':
-          nw = Math.max(MIN_DIM, sb.w - dx); nx = sb.x + sb.w - nw; break;
-        case 'mr':
-          nw = Math.max(MIN_DIM, sb.w + dx); break;
       }
 
       const b = { x: nx, y: ny, w: nw, h: nh };
@@ -999,8 +994,6 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     { type: 'tl', cx: box.x * DISPLAY_SCALE,           cy: box.y * DISPLAY_SCALE           },
     { type: 'tc', cx: (box.x + box.w / 2) * DISPLAY_SCALE, cy: box.y * DISPLAY_SCALE       },
     { type: 'tr', cx: (box.x + box.w) * DISPLAY_SCALE,   cy: box.y * DISPLAY_SCALE         },
-    { type: 'ml', cx: box.x * DISPLAY_SCALE,           cy: (box.y + box.h / 2) * DISPLAY_SCALE },
-    { type: 'mr', cx: (box.x + box.w) * DISPLAY_SCALE,   cy: (box.y + box.h / 2) * DISPLAY_SCALE },
     { type: 'bl', cx: box.x * DISPLAY_SCALE,           cy: (box.y + box.h) * DISPLAY_SCALE },
     { type: 'bc', cx: (box.x + box.w / 2) * DISPLAY_SCALE, cy: (box.y + box.h) * DISPLAY_SCALE },
     { type: 'br', cx: (box.x + box.w) * DISPLAY_SCALE,   cy: (box.y + box.h) * DISPLAY_SCALE },
