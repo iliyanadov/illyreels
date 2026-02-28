@@ -607,7 +607,7 @@ export default function Home() {
                         canvasRefsMap.current.delete(entry.id);
                       }
                     }}
-                    videoSrc={proxyStreamUrl(entry.data!.hdplay || entry.data!.play || entry.data!.wmplay)}
+                    videoSrc={proxyStreamUrl(entry.data!.play || entry.data!.hdplay || entry.data!.wmplay)}
                     videoId={entry.data!.id}
                     rowNumber={rowIndex}
                     onVideoError={() => handleVideoError(entry.id)}

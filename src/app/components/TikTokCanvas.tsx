@@ -133,6 +133,8 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
   const [isPlaying, setIsPlaying] = useState(false);
   // Video error state
   const [videoError, setVideoError] = useState<string | null>(null);
+  // Video loading state - true when video is still fetching data
+  const [isVideoLoading, setIsVideoLoading] = useState(false);
 
   // Box lives in both a ref (for the draw loop) and state (for handle positions)
   const boxRef = useRef<Box>({ x: 0, y: 0, w: CANVAS_W, h: CANVAS_H });
@@ -197,21 +199,52 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     };
   }, [videoSrc]);
 
-  // Clear video error when videoSrc changes and set up timeout
+  // Clear video error when videoSrc changes and set up loading state
   useEffect(() => {
     console.log('Video source changed for videoId:', videoId);
     console.log('Video src (first 200 chars):', videoSrc.substring(0, Math.min(200, videoSrc.length)));
     setVideoError(null);
+    setIsVideoLoading(true);
+
+    const video = videoRef.current;
+    if (!video) {
+      setIsVideoLoading(false);
+      return;
+    }
+
+    // Reset video before loading new source
+    video.pause();
+    video.removeAttribute('src'); // Clear existing source
+    video.load(); // Reset the video element
+
+    // Set the new source
+    video.src = videoSrc;
+
+    // Track when video is ready or fails
+    const handleLoadedData = () => {
+      if (video.readyState >= 2) {
+        console.log(`Video ${videoId} loaded data, readyState:`, video.readyState);
+        setIsVideoLoading(false);
+      }
+    };
+
+    const handleError = () => {
+      console.log(`Video ${videoId} error`);
+      setIsVideoLoading(false);
+    };
+
+    video.addEventListener('loadeddata', handleLoadedData);
+    video.addEventListener('error', handleError);
 
     // Set a timeout to detect videos that never load
     // Some TikTok videos can take 60+ seconds to load from their CDN
     const timeoutId = setTimeout(() => {
-      const currentVideo = videoRef.current;
-      if (currentVideo && currentVideo.readyState < 2 && !videoError) {
+      if (video.readyState < 2 && !videoError) {
         console.error('Video loading timeout for videoId:', videoId);
         console.error('Video src (first 200 chars):', videoSrc.substring(0, Math.min(200, videoSrc.length)));
-        console.error('ReadyState:', currentVideo.readyState, 'NetworkState:', currentVideo.networkState);
+        console.error('ReadyState:', video.readyState, 'NetworkState:', video.networkState);
         setVideoError('Video failed to load. The video URL may be invalid.');
+        setIsVideoLoading(false);
         if (onVideoError) {
           onVideoError();
         }
@@ -220,6 +253,8 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
 
     return () => {
       clearTimeout(timeoutId);
+      video.removeEventListener('loadeddata', handleLoadedData);
+      video.removeEventListener('error', handleError);
     };
   }, [videoSrc]);
 
@@ -1107,6 +1142,23 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
           className="block rounded-2xl border border-zinc-700 shadow-[0_0_48px_rgba(254,44,85,0.1)]"
         />
 
+        {/* Video loading overlay */}
+        {isVideoLoading && !videoError && (
+          <div
+            className="absolute inset-0 flex items-center justify-center bg-black/60 rounded-2xl"
+            style={{ width: CANVAS_W * DISPLAY_SCALE, height: CANVAS_H * DISPLAY_SCALE }}
+          >
+            <div className="text-center px-4">
+              <svg className="animate-spin mx-auto mb-2" width="32" height="32" viewBox="0 0 24 24" fill="none">
+                <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" className="opacity-25"/>
+                <path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" className="opacity-75"/>
+              </svg>
+              <p className="text-zinc-300 text-sm font-medium">Loading video...</p>
+              <p className="text-zinc-500 text-xs mt-1">Large videos may take a minute</p>
+            </div>
+          </div>
+        )}
+
         {/* Video error overlay */}
         {videoError && (
           <div
@@ -1241,8 +1293,8 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
       {/* Hidden video — feeds the canvas draw loop */}
       <video
         ref={videoRef}
-        src={videoSrc}
         crossOrigin="anonymous"
+        preload="auto"
         loop muted playsInline
         onPlay={() => setIsPlaying(true)}
         onPause={() => setIsPlaying(false)}
@@ -1252,6 +1304,25 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
           if (v && v.duration > 1) {
             v.currentTime = 1;
           }
+        }}
+        onProgress={() => {
+          // Track loading progress for debugging
+          const v = videoRef.current;
+          if (v && v.buffered.length > 0) {
+            const bufferedEnd = v.buffered.end(v.buffered.length - 1);
+            if (v.duration > 0 && bufferedEnd > 0) {
+              const percent = (bufferedEnd / v.duration) * 100;
+              if (videoId && percent < 100) {
+                console.log(`Video ${videoId} buffering: ${percent.toFixed(1)}%`);
+              }
+            }
+          }
+        }}
+        onCanPlay={() => {
+          console.log(`Video ${videoId} can play`);
+        }}
+        onCanPlayThrough={() => {
+          console.log(`Video ${videoId} can play through`);
         }}
         onError={(e) => {
           const video = e.target as HTMLVideoElement;
