@@ -840,7 +840,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
 
   // ── Global mouse move / up (drag works even outside the canvas) ──────────────
   useEffect(() => {
-    function applyDrag(dx: number, dy: number) {
+    function applyDrag(dx: number, dy: number, shiftKey: boolean) {
       if (!drag.current) return;
       const { handle: h, sb, videoOffsetStart } = drag.current;
       let nx = sb.x, ny = sb.y, nw = sb.w, nh = sb.h;
@@ -856,17 +856,47 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
 
       switch (h) {
         case 'br':
-          nh = Math.max(MIN_DIM, sb.h + dy); break;
+          if (shiftKey) {
+            nh = Math.max(MIN_DIM, sb.h + dy * 2); ny = sb.y - dy;
+          } else {
+            nh = Math.max(MIN_DIM, sb.h + dy);
+          }
+          break;
         case 'bl':
-          nh = Math.max(MIN_DIM, sb.h + dy); break;
+          if (shiftKey) {
+            nh = Math.max(MIN_DIM, sb.h + dy * 2); ny = sb.y - dy;
+          } else {
+            nh = Math.max(MIN_DIM, sb.h + dy);
+          }
+          break;
         case 'tr':
-          nh = Math.max(MIN_DIM, sb.h - dy); ny = sb.y + sb.h - nh; break;
+          if (shiftKey) {
+            nh = Math.max(MIN_DIM, sb.h - dy * 2); ny = sb.y + dy;
+          } else {
+            nh = Math.max(MIN_DIM, sb.h - dy); ny = sb.y + sb.h - nh;
+          }
+          break;
         case 'tl':
-          nh = Math.max(MIN_DIM, sb.h - dy); ny = sb.y + sb.h - nh; break;
+          if (shiftKey) {
+            nh = Math.max(MIN_DIM, sb.h - dy * 2); ny = sb.y + dy;
+          } else {
+            nh = Math.max(MIN_DIM, sb.h - dy); ny = sb.y + sb.h - nh;
+          }
+          break;
         case 'tc':
-          nh = Math.max(MIN_DIM, sb.h - dy); ny = sb.y + sb.h - nh; break;
+          if (shiftKey) {
+            nh = Math.max(MIN_DIM, sb.h - dy * 2); ny = sb.y + dy;
+          } else {
+            nh = Math.max(MIN_DIM, sb.h - dy); ny = sb.y + sb.h - nh;
+          }
+          break;
         case 'bc':
-          nh = Math.max(MIN_DIM, sb.h + dy); break;
+          if (shiftKey) {
+            nh = Math.max(MIN_DIM, sb.h + dy * 2); ny = sb.y - dy;
+          } else {
+            nh = Math.max(MIN_DIM, sb.h + dy);
+          }
+          break;
       }
 
       const b = { x: nx, y: ny, w: nw, h: nh };
@@ -879,7 +909,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
       // Convert screen-space drag delta to canvas-space by dividing to DISPLAY_SCALE
       const dx = (e.clientX - drag.current.sx) / DISPLAY_SCALE;
       const dy = (e.clientY - drag.current.sy) / DISPLAY_SCALE;
-      applyDrag(dx, dy);
+      applyDrag(dx, dy, e.shiftKey);
     }
     function onUp() { drag.current = null; }
 
