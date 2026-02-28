@@ -284,7 +284,7 @@ export default function Home() {
     for (const entry of entriesToFetch) {
       await fetchVideo(entry.id);
       // Delay between requests to avoid rate limiting
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise(resolve => setTimeout(resolve, 500));
     }
   }
 
