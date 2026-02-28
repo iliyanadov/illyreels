@@ -697,9 +697,9 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
             const payoutLineWidth = ctx.measureText(prefix + greenText).width;
             
             // Draw percentage (larger, above and centered over payout)
-            ctx.font = '700 48px system-ui, sans-serif'; // Increased from 44px to 48px
+            ctx.font = '700 60px system-ui, sans-serif'; // Increased from 48px to 60px
             ctx.fillStyle = 'rgb(231, 233, 234)';
-            const oddsY = boxY + boxHeight / 2 - 2; // Slightly above center
+            const oddsY = boxY + boxHeight / 2 + 4; // Moved down slightly
             // Center the percentage above the payout line
             const percentageWidth = ctx.measureText(oddsText).width;
             const percentageX = oddsColumnEnd - (payoutLineWidth / 2) + (percentageWidth / 2);
@@ -707,7 +707,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
             ctx.fillText(oddsText, percentageX, oddsY);
             
             // Draw payout with mixed colors
-            ctx.font = '400 17px system-ui, sans-serif'; // Increased from 16px to 17px
+            ctx.font = '400 20px system-ui, sans-serif'; // Increased from 17px to 20px
             const payoutY = oddsY + 34; // Reduced from 38 to bring closer
             
             // Measure and draw the full text with green payout
@@ -718,7 +718,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
             ctx.fillText(greenText, oddsColumnEnd, payoutY);
             
             // Draw "$100 → " in gray (to the left of green text)
-            ctx.fillStyle = 'rgba(113, 118, 123, 1)';
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
             ctx.fillText(prefix, oddsColumnEnd - greenWidth, payoutY);
             
             ctx.textAlign = 'left'; // Reset alignment
