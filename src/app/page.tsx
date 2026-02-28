@@ -758,6 +758,7 @@ export default function Home() {
                 <p className="font-medium text-zinc-300 mb-1">Expected format:</p>
                 <p>• Column A: TikTok/Instagram URL</p>
                 <p>• Column B: Caption</p>
+                <p>• Column C: Tag (e.g., "film")</p>
               </div>
 
               {sheetsError && (
