@@ -752,13 +752,13 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
               // Draw banner (removed bounds check to debug)
               ctx.drawImage(banner, bannerX, bannerY, bannerWidth, bannerHeight);
               
-              // Draw "Link in bio to start trading" below the banner
-              ctx.font = '400 15px system-ui, sans-serif'; // Increased from 14px to 15px
-              ctx.fillStyle = 'rgba(113, 118, 123, 1)'; // Gray color
+              // Draw "Exclusive access in bio" below the banner
+              ctx.font = '400 17px system-ui, sans-serif';
+              ctx.fillStyle = 'rgba(255, 255, 255, 0.5)'; // White at 50% opacity
               ctx.textAlign = 'center';
               const textX = bannerX + bannerWidth / 2; // Center text under banner
               const textY = bannerY + bannerHeight + textGap + 10;
-              ctx.fillText('Link in bio to start trading', textX, textY);
+              ctx.fillText('Exclusive access in bio', textX, textY);
             }
             
             // Reset text alignment to left (default)
