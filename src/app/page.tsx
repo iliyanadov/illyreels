@@ -171,53 +171,68 @@ export default function Home() {
   }
 
   function updateEntry(id: string, field: 'url' | 'caption' | 'eventId', value: string) {
-    setEntries(entries.map(e => e.id === id ? { ...e, [field]: value } : e));
+    setEntries(prevEntries => prevEntries.map(e => e.id === id ? { ...e, [field]: value } : e));
   }
 
   async function fetchMarket(id: string) {
-    const entry = entries.find(e => e.id === id);
-    if (!entry || !entry.eventId.trim()) return;
+    let eventId = '';
 
-    setEntries(entries.map(e => 
-      e.id === id ? { ...e, loadingMarket: true, marketError: '', marketData: null } : e
-    ));
+    setEntries(prevEntries => {
+      const entry = prevEntries.find(e => e.id === id);
+      if (!entry || !entry.eventId.trim()) return prevEntries;
+      eventId = entry.eventId.trim();
+      return prevEntries.map(e =>
+        e.id === id ? { ...e, loadingMarket: true, marketError: '', marketData: null } : e
+      );
+    });
+
+    if (!eventId) return;
 
     try {
       // Use our Next.js API route to avoid CORS issues
-      const res = await fetch(`/api/market?eventId=${encodeURIComponent(entry.eventId.trim())}&withNestedMarkets=true`);
-      
+      const res = await fetch(`/api/market?eventId=${encodeURIComponent(eventId)}&withNestedMarkets=true`);
+
       console.log('Response status:', res.status);
-      
+
       const json = await res.json();
       console.log('Response data:', json);
-      
-      setEntries(entries.map(e => 
-        e.id === id ? { 
-          ...e, 
-          loadingMarket: false, 
+
+      setEntries(prevEntries => prevEntries.map(e =>
+        e.id === id ? {
+          ...e,
+          loadingMarket: false,
           marketError: res.ok ? '' : (json.error || json.message || `Error ${res.status}: Failed to fetch market data`),
-          marketData: res.ok ? json : null 
+          marketData: res.ok ? json : null
         } : e
       ));
     } catch (error) {
       console.error('Fetch error:', error);
-      setEntries(entries.map(e => 
+      setEntries(prevEntries => prevEntries.map(e =>
         e.id === id ? { ...e, loadingMarket: false, marketError: 'Network error — please try again' } : e
       ));
     }
   }
 
   async function fetchVideo(id: string) {
-    const entry = entries.find(e => e.id === id);
-    if (!entry || !entry.url.trim()) return;
-    if (!entry.caption.trim()) {
-      setEntries(entries.map(e =>
+    // Get current entry data before any async operations
+    const currentEntry = entries.find(e => e.id === id);
+
+    if (!currentEntry || !currentEntry.url.trim()) {
+      setEntries(prev => prev.map(e =>
+        e.id === id ? { ...e, error: 'URL is required' } : e
+      ));
+      return;
+    }
+
+    if (!currentEntry.caption.trim()) {
+      setEntries(prev => prev.map(e =>
         e.id === id ? { ...e, error: 'Caption is required' } : e
       ));
       return;
     }
 
-    setEntries(entries.map(e =>
+    // Set loading state
+    setEntries(prev => prev.map(e =>
       e.id === id ? { ...e, loading: true, error: '', data: null } : e
     ));
 
@@ -225,36 +240,38 @@ export default function Home() {
       const res = await fetch('/api/download', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: entry.url.trim() }),
+        body: JSON.stringify({ url: currentEntry.url.trim() }),
       });
+
       const json = await res.json();
-      
-      setEntries(entries.map(e => 
-        e.id === id ? { 
-          ...e, 
-          loading: false, 
+
+      setEntries(prev => prev.map(e =>
+        e.id === id ? {
+          ...e,
+          loading: false,
           error: res.ok ? '' : (json.error || 'Something went wrong'),
-          data: res.ok ? json : null 
+          data: res.ok ? json : null
         } : e
       ));
-    } catch {
-      setEntries(entries.map(e => 
+    } catch (err) {
+      console.error('Fetch video error:', err);
+      setEntries(prev => prev.map(e =>
         e.id === id ? { ...e, loading: false, error: 'Network error — please try again' } : e
       ));
     }
   }
 
   async function fetchAllVideos() {
-    // Fetch all entries that have URLs, captions, but no data yet
-    const promises = entries
-      .filter(e => e.url.trim() && e.caption.trim() && !e.data && !e.loading)
-      .map(e => fetchVideo(e.id));
+    // Get all entries that need fetching
+    const entriesToFetch = entries.filter(e =>
+      e.url.trim() && e.caption.trim() && !e.data && !e.loading
+    );
 
-    if (promises.length === 0) {
+    if (entriesToFetch.length === 0) {
       // Show error if no valid entries
       const entriesWithoutCaption = entries.filter(e => e.url.trim() && !e.caption.trim());
       if (entriesWithoutCaption.length > 0) {
-        setEntries(entries.map(e =>
+        setEntries(prevEntries => prevEntries.map(e =>
           entriesWithoutCaption.some(ne => ne.id === e.id)
             ? { ...e, error: 'Caption is required' }
             : e
@@ -263,7 +280,12 @@ export default function Home() {
       return;
     }
 
-    await Promise.all(promises);
+    // Fetch sequentially to avoid rate limiting
+    for (const entry of entriesToFetch) {
+      await fetchVideo(entry.id);
+      // Delay between requests to avoid rate limiting
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
   }
 
   async function downloadAll() {
