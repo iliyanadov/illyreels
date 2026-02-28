@@ -1194,6 +1194,13 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
         loop muted playsInline
         onPlay={() => setIsPlaying(true)}
         onPause={() => setIsPlaying(false)}
+        onLoadedMetadata={() => {
+          // Seek to 1 second and pause by default
+          const v = videoRef.current;
+          if (v && v.duration > 1) {
+            v.currentTime = 1;
+          }
+        }}
         onError={(e) => {
           console.error('Video error:', e);
         }}
