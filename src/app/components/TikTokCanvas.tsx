@@ -201,6 +201,12 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
 
   // Clear video error when videoSrc changes and set up loading state
   useEffect(() => {
+    // Skip if videoSrc is empty or doesn't contain a real URL
+    if (!videoSrc || !videoSrc.includes('url=') || videoSrc.endsWith('url=')) {
+      setIsVideoLoading(false);
+      return;
+    }
+
     console.log('Video source changed for videoId:', videoId);
     console.log('Video src (first 200 chars):', videoSrc.substring(0, Math.min(200, videoSrc.length)));
     setVideoError(null);
@@ -1328,6 +1334,12 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
           const video = e.target as HTMLVideoElement;
           const errorCode = video.error?.code;
           const errorMessage = video.error?.message;
+
+          // Skip error handling if there's no actual error (happens when we reset the video element)
+          if (!errorCode) {
+            return;
+          }
+
           const errorDetails = {
             code: errorCode,
             message: errorMessage,
