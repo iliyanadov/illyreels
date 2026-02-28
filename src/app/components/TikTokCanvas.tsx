@@ -83,6 +83,7 @@ interface MarketData {
 interface Props {
   videoSrc: string;
   videoId?: string;
+  rowNumber?: number; // Row number for ordered exports
   overlayDisplayName?: string;
   overlayHandle?: string;
   overlayDate?: string;
@@ -99,6 +100,7 @@ export interface TikTokCanvasRef {
 export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCanvas({
   videoSrc,
   videoId,
+  rowNumber = 0,
   overlayDisplayName = 'Sonotrade',
   overlayHandle = '@SonotradeHQ',
   overlayDate = 'Jan 22',
@@ -955,7 +957,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
           const url  = URL.createObjectURL(blob);
           Object.assign(document.createElement('a'), {
             href: url,
-            download: `tiktok-canvas-${videoId ?? 'export'}.${fileExt}`,
+            download: `row-${String(rowNumber + 1).padStart(2, '0')}-${videoId ?? 'export'}.${fileExt}`,
           }).click();
           URL.revokeObjectURL(url);
         }

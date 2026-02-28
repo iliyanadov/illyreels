@@ -599,6 +599,7 @@ export default function Home() {
                     }}
                     videoSrc={proxyStreamUrl(entry.data!.hdplay || entry.data!.play || entry.data!.wmplay)}
                     videoId={entry.data!.id}
+                    rowNumber={rowIndex}
                     overlayCaption={entry.caption}
                     eventId={entry.eventId}
                     marketData={entry.marketData}
