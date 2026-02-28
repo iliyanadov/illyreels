@@ -110,7 +110,8 @@ function proxyUrl(url: string, filename: string): string {
 }
 
 function proxyStreamUrl(url: string): string {
-  return `/api/proxy?url=${encodeURIComponent(url)}&stream=1`;
+  // Properly encode the URL for the query parameter
+  return `/api/proxy?stream=1&url=${encodeURIComponent(url)}`;
 }
 
 function formatDuration(seconds: number): string {
@@ -189,7 +190,7 @@ export default function Home() {
       if (!entry || !entry.eventId.trim()) return prevEntries;
       eventId = entry.eventId.trim();
       return prevEntries.map(e =>
-        e.id === id ? { ...e, loadingMarket: true, marketError: '', marketData: null } : e
+        e.id === id ? { ...e, loadingMarket: true, marketError: '', marketData: null, videoFailed: false } : e
       );
     });
 
@@ -358,7 +359,8 @@ export default function Home() {
         loading: false,
         loadingMarket: false,
         error: '',
-        marketError: ''
+        marketError: '',
+        videoFailed: false
       }));
 
       // Replace current entries with imported ones

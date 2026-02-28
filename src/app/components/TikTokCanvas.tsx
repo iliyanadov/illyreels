@@ -197,29 +197,30 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     };
   }, [videoSrc]);
 
-  // Clear video error when videoSrc changes
+  // Clear video error when videoSrc changes and set up timeout
   useEffect(() => {
-    console.log('Video source changed:', { videoId, videoSrc });
+    console.log('Video source changed for videoId:', videoId);
+    console.log('Video src (first 200 chars):', videoSrc.substring(0, Math.min(200, videoSrc.length)));
     setVideoError(null);
 
     // Set a timeout to detect videos that never load
+    // Some TikTok videos can take 60+ seconds to load from their CDN
     const timeoutId = setTimeout(() => {
-      const video = videoRef.current;
-      if (video && video.readyState < 2 && !videoError) {
-        // Video hasn't loaded after 10 seconds
-        console.error('Video loading timeout:', {
-          src: videoSrc,
-          readyState: video.readyState,
-          networkState: video.networkState
-        });
+      const currentVideo = videoRef.current;
+      if (currentVideo && currentVideo.readyState < 2 && !videoError) {
+        console.error('Video loading timeout for videoId:', videoId);
+        console.error('Video src (first 200 chars):', videoSrc.substring(0, Math.min(200, videoSrc.length)));
+        console.error('ReadyState:', currentVideo.readyState, 'NetworkState:', currentVideo.networkState);
         setVideoError('Video failed to load. The video URL may be invalid.');
         if (onVideoError) {
           onVideoError();
         }
       }
-    }, 10000);
+    }, 120000); // 2 minutes - some TikTok CDN responses are very slow
 
-    return () => clearTimeout(timeoutId);
+    return () => {
+      clearTimeout(timeoutId);
+    };
   }, [videoSrc]);
 
   // ── Helper: Count caption lines accurately ───────────────────────────────────
