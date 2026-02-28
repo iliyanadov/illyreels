@@ -540,11 +540,6 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
         ctx.drawImage(video, dx, dy, drawW, drawH);
         ctx.restore();
 
-        // Draw crop box border (white, 2px, 50% opacity)
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
-        ctx.lineWidth = 2;
-        ctx.strokeRect(x, y, w, h);
-
         // Draw market data box below the video (only if tag is provided)
         if (tag?.trim() && marketData && marketData.markets && marketData.markets.length > 0) {
           const boxY = y + h + 30; // 30px gap below video
