@@ -90,7 +90,7 @@ interface VideoEntry {
   id: string;
   url: string;
   caption: string;
-  eventId: string;
+  tag: string;
   data: VideoData | null;
   marketData: EventData | null;
   loading: boolean;
@@ -120,9 +120,14 @@ function formatDuration(seconds: number): string {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
+// Tag to Event ID mapping
+const TAG_TO_EVENT_ID: Record<string, string> = {
+  'film': 'KXENGAGEMENTTIMOTHEEKYLIE-26',
+};
+
 export default function Home() {
   const [entries, setEntries] = useState<VideoEntry[]>([
-    { id: '1', url: '', caption: '', eventId: '', data: null, marketData: null, loading: false, loadingMarket: false, error: '', marketError: '', videoFailed: false }
+    { id: '1', url: '', caption: '', tag: '', data: null, marketData: null, loading: false, loadingMarket: false, error: '', marketError: '', videoFailed: false }
   ]);
 
   // Store refs for each canvas to trigger downloads
@@ -147,14 +152,14 @@ export default function Home() {
   }, []);
 
   function addRow() {
-    setEntries([...entries, { 
-      id: Date.now().toString(), 
-      url: '', 
-      caption: '', 
-      eventId: '',
-      data: null, 
+    setEntries([...entries, {
+      id: Date.now().toString(),
+      url: '',
+      caption: '',
+      tag: '',
+      data: null,
       marketData: null,
-      loading: false, 
+      loading: false,
       loadingMarket: false,
       error: '',
       marketError: ''
@@ -168,7 +173,7 @@ export default function Home() {
 
   function resetEverything() {
     setEntries([
-      { id: '1', url: '', caption: '', eventId: '', data: null, marketData: null, loading: false, loadingMarket: false, error: '', marketError: '', videoFailed: false }
+      { id: '1', url: '', caption: '', tag: '', data: null, marketData: null, loading: false, loadingMarket: false, error: '', marketError: '', videoFailed: false }
     ]);
   }
 
@@ -178,23 +183,31 @@ export default function Home() {
     ));
   }
 
-  function updateEntry(id: string, field: 'url' | 'caption' | 'eventId', value: string) {
+  function updateEntry(id: string, field: 'url' | 'caption' | 'tag', value: string) {
     setEntries(prevEntries => prevEntries.map(e => e.id === id ? { ...e, [field]: value } : e));
   }
 
   async function fetchMarket(id: string) {
-    let eventId = '';
+    // Get the tag BEFORE any state updates
+    const entry = entries.find(e => e.id === id);
+    if (!entry || !entry.tag.trim()) return;
 
-    setEntries(prevEntries => {
-      const entry = prevEntries.find(e => e.id === id);
-      if (!entry || !entry.eventId.trim()) return prevEntries;
-      eventId = entry.eventId.trim();
-      return prevEntries.map(e =>
-        e.id === id ? { ...e, loadingMarket: true, marketError: '', marketData: null, videoFailed: false } : e
-      );
-    });
+    const tag = entry.tag.trim().toLowerCase();
+    const eventId = TAG_TO_EVENT_ID[tag];
 
-    if (!eventId) return;
+    if (!eventId) {
+      setEntries(prevEntries => prevEntries.map(e =>
+        e.id === id ? { ...e, loadingMarket: false, marketError: `Unknown tag: ${tag}` } : e
+      ));
+      return;
+    }
+
+    console.log('Fetching market for tag:', tag, '→ eventId:', eventId);
+
+    // Set loading state
+    setEntries(prevEntries => prevEntries.map(e =>
+      e.id === id ? { ...e, loadingMarket: true, marketError: '', marketData: null, videoFailed: false } : e
+    ));
 
     try {
       // Use our Next.js API route to avoid CORS issues
@@ -239,9 +252,9 @@ export default function Home() {
       return;
     }
 
-    // Set loading state
+    // Set loading state for both video and market
     setEntries(prev => prev.map(e =>
-      e.id === id ? { ...e, loading: true, error: '', data: null, videoFailed: false } : e
+      e.id === id ? { ...e, loading: true, loadingMarket: !!e.tag.trim(), error: '', data: null, marketData: null, marketError: '', videoFailed: false } : e
     ));
 
     try {
@@ -265,8 +278,41 @@ export default function Home() {
     } catch (err) {
       console.error('Fetch video error:', err);
       setEntries(prev => prev.map(e =>
-        e.id === id ? { ...e, loading: false, error: 'Network error — please try again' } : e
+        e.id === id ? { ...e, loading: false, error: 'Network error — please try again', loadingMarket: false } : e
       ));
+      return;
+    }
+
+    // Fetch market data if tag is present
+    const entry = entries.find(e => e.id === id);
+    if (entry?.tag.trim()) {
+      const tag = entry.tag.trim().toLowerCase();
+      const eventId = TAG_TO_EVENT_ID[tag];
+
+      if (eventId) {
+        console.log('Fetching market for tag:', tag, '→ eventId:', eventId);
+        try {
+          const res = await fetch(`/api/market?eventId=${encodeURIComponent(eventId)}&withNestedMarkets=true`);
+          const json = await res.json();
+          setEntries(prev => prev.map(e =>
+            e.id === id ? {
+              ...e,
+              loadingMarket: false,
+              marketError: res.ok ? '' : (json.error || json.message || `Error ${res.status}: Failed to fetch market data`),
+              marketData: res.ok ? json : null
+            } : e
+          ));
+        } catch (error) {
+          console.error('Fetch market error:', error);
+          setEntries(prev => prev.map(e =>
+            e.id === id ? { ...e, loadingMarket: false, marketError: 'Network error' } : e
+          ));
+        }
+      } else {
+        setEntries(prev => prev.map(e =>
+          e.id === id ? { ...e, loadingMarket: false, marketError: `Unknown tag: ${tag}` } : e
+        ));
+      }
     }
   }
 
@@ -353,7 +399,7 @@ export default function Home() {
         id: Date.now().toString() + Math.random().toString(36).substring(2, 11),
         url: row.url,
         caption: row.caption,
-        eventId: row.eventId || '',
+        tag: row.tag || '',
         data: null,
         marketData: null,
         loading: false,
@@ -365,7 +411,7 @@ export default function Home() {
 
       // Replace current entries with imported ones
       setEntries(newEntries.length > 0 ? newEntries : [
-        { id: '1', url: '', caption: '', eventId: '', data: null, marketData: null, loading: false, loadingMarket: false, error: '', marketError: '', videoFailed: false }
+        { id: '1', url: '', caption: '', tag: '', data: null, marketData: null, loading: false, loadingMarket: false, error: '', marketError: '', videoFailed: false }
       ]);
 
       setShowSheetsModal(false);
@@ -507,27 +553,19 @@ export default function Home() {
                       />
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex gap-2">
-                        <input
-                          type="text"
-                          value={entry.eventId}
-                          onChange={e => updateEntry(entry.id, 'eventId', e.target.value)}
-                          onKeyDown={e => {
-                            if ((e.metaKey || e.ctrlKey) && e.key === 'z') {
-                              e.preventDefault();
-                            }
-                          }}
-                          placeholder="Event ticker..."
-                          className="flex-1 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white placeholder-zinc-500 outline-none focus:border-blue-500 transition-colors"
-                        />
-                        <button
-                          onClick={() => fetchMarket(entry.id)}
-                          disabled={!entry.eventId.trim() || entry.loadingMarket}
-                          className="rounded-lg border border-blue-700 bg-blue-950/20 px-3 py-2 text-xs font-semibold text-blue-400 hover:bg-blue-950/40 hover:border-blue-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
-                        >
-                          {entry.loadingMarket ? 'Loading...' : 'Fetch'}
-                        </button>
-                      </div>
+                      <input
+                        type="text"
+                        value={entry.tag}
+                        onChange={e => updateEntry(entry.id, 'tag', e.target.value)}
+                        onKeyDown={e => {
+                          if ((e.metaKey || e.ctrlKey) && e.key === 'z') {
+                            e.preventDefault();
+                          }
+                        }}
+                        disabled={entry.loading}
+                        placeholder="Tag (e.g., film)..."
+                        className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white placeholder-zinc-500 outline-none focus:border-blue-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      />
                       {entry.marketError && (
                         <p className="mt-1 text-xs text-red-400">{entry.marketError}</p>
                       )}
@@ -612,7 +650,7 @@ export default function Home() {
                     rowNumber={rowIndex}
                     onVideoError={() => handleVideoError(entry.id)}
                     overlayCaption={entry.caption}
-                    eventId={entry.eventId}
+                    tag={entry.tag}
                     marketData={entry.marketData}
                   />
 

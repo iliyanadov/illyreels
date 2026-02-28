@@ -90,7 +90,7 @@ interface Props {
   overlayDate?: string;
   overlayVerified?: boolean;
   overlayCaption?: string;
-  eventId?: string;
+  tag?: string;
   marketData?: MarketData | null;
 }
 
@@ -108,7 +108,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
   overlayDate = 'Jan 22',
   overlayVerified = true,
   overlayCaption = '',
-  eventId = '',
+  tag = '',
   marketData = null,
 }: Props, ref) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -510,8 +510,8 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
         ctx.drawImage(video, dx, dy, drawW, drawH);
         ctx.restore();
 
-        // Draw market data box below the video (only if eventId is provided)
-        if (eventId?.trim() && marketData && marketData.markets && marketData.markets.length > 0) {
+        // Draw market data box below the video (only if tag is provided)
+        if (tag?.trim() && marketData && marketData.markets && marketData.markets.length > 0) {
           const boxY = y + h + 30; // 30px gap below video
           const boxHeight = 140; // Height of the box
           const boxPadding = 60; // Padding from edges
@@ -913,7 +913,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     const cropBoxHeight = currentBox.h;
 
     // Market box height (if present)
-    const hasMarketBox = eventId?.trim() && marketData && marketData.markets && marketData.markets.length > 0;
+    const hasMarketBox = tag?.trim() && marketData && marketData.markets && marketData.markets.length > 0;
     const marketBoxHeight = hasMarketBox ? 140 + 30 : 0; // 140 box height + 30px gap
 
     // Total content height

@@ -5,7 +5,7 @@ export const runtime = 'nodejs';
 interface SheetRow {
   url: string;
   caption: string;
-  eventId: string;
+  tag: string;
 }
 
 export async function GET(request: NextRequest) {
@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const range = `${encodeURIComponent(sheetName)}!A${startRow}:B${endRow}`;
+    const range = `${encodeURIComponent(sheetName)}!A${startRow}:C${endRow}`;
     const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}`;
 
     console.log('Fetching from:', url);
@@ -66,6 +66,7 @@ export async function GET(request: NextRequest) {
       .map((row: string[]) => {
         const url = row[0]?.trim() || '';
         const caption = row[1]?.trim() || '';
+        const tag = row[2]?.trim() || '';
 
         // Skip rows without URL
         if (!url) return null;
@@ -73,7 +74,7 @@ export async function GET(request: NextRequest) {
         return {
           url,
           caption,
-          eventId: '',
+          tag,
         };
       })
       .filter((row): row is SheetRow => row !== null);
