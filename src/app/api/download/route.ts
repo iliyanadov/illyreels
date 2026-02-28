@@ -106,7 +106,20 @@ export async function POST(request: NextRequest) {
 
       if (json.code !== 0) {
         console.error('TikWM error:', json);
-        return NextResponse.json({ error: json.msg || 'Failed to fetch TikTok video' }, { status: 400 });
+        // Provide more user-friendly error messages
+        const errorMsg = json.msg || 'Failed to fetch TikTok video';
+        let userMessage = errorMsg;
+
+        // Map common error messages to user-friendly ones
+        if (errorMsg.includes('not found') || errorMsg.includes('Video not found')) {
+          userMessage = 'Video not found. The link may be private, deleted, or invalid.';
+        } else if (errorMsg.includes('Api rate limit') || errorMsg.includes('rate limit')) {
+          userMessage = 'Too many requests. Please wait a moment and try again.';
+        } else if (errorMsg.includes('Url parsing') || errorMsg.includes('invalid')) {
+          userMessage = 'Invalid TikTok URL. Please check the link and try again.';
+        }
+
+        return NextResponse.json({ error: userMessage }, { status: 400 });
       }
 
       console.log('TikTok video fetched successfully:', json.data?.id);
