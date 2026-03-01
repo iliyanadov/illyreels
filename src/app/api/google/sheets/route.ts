@@ -77,7 +77,7 @@ export async function GET(request: NextRequest) {
           tag,
         };
       })
-      .filter((row): row is SheetRow => row !== null);
+      .filter((row: SheetRow | null): row is SheetRow => row !== null);
 
     console.log('Successfully imported', rows.length, 'rows');
 

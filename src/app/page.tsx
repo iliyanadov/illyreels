@@ -162,7 +162,8 @@ export default function Home() {
       loading: false,
       loadingMarket: false,
       error: '',
-      marketError: ''
+      marketError: '',
+      videoFailed: false
     }]);
   }
 

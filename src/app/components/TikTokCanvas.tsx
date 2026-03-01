@@ -179,7 +179,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     const handleLoadedMetadata = () => {
       const vw = video.videoWidth;
       const vh = video.videoHeight;
-      console.log('Video loaded successfully:', { videoId, vw, vh, src: videoSrc });
+      console.log('[Row ' + (rowNumber + 1) + '] Video loaded successfully:', { videoId, vw, vh, src: videoSrc });
       if (vw && vh) {
         // Calculate scale to fit video to VIDEO_TARGET_W width
         const scale = Math.min(VIDEO_TARGET_W / vw, CANVAS_H / vh);
@@ -213,8 +213,8 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
       return;
     }
 
-    console.log('Video source changed for videoId:', videoId);
-    console.log('Video src (first 200 chars):', videoSrc.substring(0, Math.min(200, videoSrc.length)));
+    console.log('[Row ' + (rowNumber + 1) + '] Video source changed for videoId:', videoId);
+    console.log('[Row ' + (rowNumber + 1) + '] Video src (first 200 chars):', videoSrc.substring(0, Math.min(200, videoSrc.length)));
     setVideoError(null);
     setIsVideoLoading(true);
 
@@ -235,13 +235,13 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     // Track when video is ready or fails
     const handleLoadedData = () => {
       if (video.readyState >= 2) {
-        console.log(`Video ${videoId} loaded data, readyState:`, video.readyState);
+        console.log('[Row ' + (rowNumber + 1) + `] Video ${videoId} loaded data, readyState:`, video.readyState);
         setIsVideoLoading(false);
       }
     };
 
     const handleError = () => {
-      console.log(`Video ${videoId} error`);
+      console.log('[Row ' + (rowNumber + 1) + `] Video ${videoId} error`);
       setIsVideoLoading(false);
     };
 
@@ -252,9 +252,9 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     // Some TikTok videos can take 60+ seconds to load from their CDN
     const timeoutId = setTimeout(() => {
       if (video.readyState < 2 && !videoError) {
-        console.error('Video loading timeout for videoId:', videoId);
-        console.error('Video src (first 200 chars):', videoSrc.substring(0, Math.min(200, videoSrc.length)));
-        console.error('ReadyState:', video.readyState, 'NetworkState:', video.networkState);
+        console.error('[Row ' + (rowNumber + 1) + '] Video loading timeout for videoId:', videoId);
+        console.error('[Row ' + (rowNumber + 1) + '] Video src (first 200 chars):', videoSrc.substring(0, Math.min(200, videoSrc.length)));
+        console.error('[Row ' + (rowNumber + 1) + '] ReadyState:', video.readyState, 'NetworkState:', video.networkState);
         setVideoError('Video failed to load. The video URL may be invalid.');
         setIsVideoLoading(false);
         if (onVideoError) {
@@ -1416,7 +1416,9 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
               else if (typeof avcC.subarray === 'function') {
                 // @ts-ignore
                 description = avcC.subarray();
-                console.log('[startRecording] Got config from avcC.subarray, length:', description.length);
+                if (description) {
+                  console.log('[startRecording] Got config from avcC.subarray, length:', description.length);
+                }
               }
               // If avcC has a start position and size, read from original buffer
               // @ts-ignore
@@ -1519,7 +1521,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
       output.addVideoTrack(videoSource);
 
       // Set up audio track BEFORE starting output
-      let audioSource: EncodedAudioPacketSource | null = null;
+      let audioSource: any = null;
       let audioPackets: any[] = []; // Store EncodedPackets from mediabunny
       let audioDecoderConfigForExport: any = null;
 
@@ -1647,6 +1649,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
 
         // Draw header overlay using reusable function (exact match with main canvas)
         // First calculate header height to position it correctly
+        // @ts-ignore - OffscreenCanvasRenderingContext2D is compatible for our use
         const captionLines = overlayCaption ? countCaptionLines(offscreenCtx) : 0;
 
         const CAPTION_BOTTOM_OFFSET = 18;
@@ -1654,9 +1657,11 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
           ? BASE_HEADER_HEIGHT + CAPTION_TOP_PADDING + (captionLines * CAPTION_LINE_HEIGHT) - CAPTION_BOTTOM_OFFSET
           : BASE_HEADER_HEIGHT;
         const headerY = Math.max(0, box.y - headerHeight + 4);
+        // @ts-ignore - OffscreenCanvasRenderingContext2D is compatible for our use
         drawHeaderOnContext({ ctx: offscreenCtx, cx: 0, cy: headerY, cw: CANVAS_W, countCaptionLinesFn: countCaptionLines });
 
         // Draw market card using reusable function (exact match with main canvas)
+        // @ts-ignore - OffscreenCanvasRenderingContext2D is compatible for our use
         drawMarketCardOnContext({ ctx: offscreenCtx, boxY: box.y + box.h + 30 });
 
         // Create VideoSample from offscreen canvas
@@ -2009,16 +2014,16 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
             if (v.duration > 0 && bufferedEnd > 0) {
               const percent = (bufferedEnd / v.duration) * 100;
               if (videoId && percent < 100) {
-                console.log(`Video ${videoId} buffering: ${percent.toFixed(1)}%`);
+                console.log('[Row ' + (rowNumber + 1) + `] Video ${videoId} buffering: ${percent.toFixed(1)}%`);
               }
             }
           }
         }}
         onCanPlay={() => {
-          console.log(`Video ${videoId} can play`);
+          console.log('[Row ' + (rowNumber + 1) + `] Video ${videoId} can play`);
         }}
         onCanPlayThrough={() => {
-          console.log(`Video ${videoId} can play through`);
+          console.log('[Row ' + (rowNumber + 1) + `] Video ${videoId} can play through`);
         }}
         onError={(e) => {
           const video = e.target as HTMLVideoElement;
@@ -2039,7 +2044,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
             currentSrc: video.currentSrc,
             error: video.error
           };
-          console.error('Video error:', errorDetails);
+          console.error('[Row ' + (rowNumber + 1) + '] Video error:', errorDetails);
 
           // If error code is undefined but error was triggered, it might be a loading issue
           if (errorCode === undefined) {
