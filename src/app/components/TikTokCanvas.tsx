@@ -2,6 +2,9 @@
 
 import { useRef, useEffect, useState, forwardRef, useImperativeHandle } from 'react';
 
+// @ts-ignore - mp4box doesn't have proper types
+import MP4Box from 'mp4box';
+
 // Internal canvas resolution (1080p portrait for highest export quality)
 export const CANVAS_W = 1080;
 export const CANVAS_H = 1920;
@@ -155,8 +158,8 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
   // Recording
   const [isRecording, setIsRecording]     = useState(false);
   const [recProgress, setRecProgress]     = useState(0);
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const recordingCancelledRef = useRef<boolean>(false);
+  const [recStatus, setRecStatus]         = useState('');
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // Expose download method to parent component via ref
   useImperativeHandle(ref, () => ({
@@ -1024,112 +1027,911 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     { type: 'br', cx: (box.x + box.w) * DISPLAY_SCALE,   cy: (box.y + box.h) * DISPLAY_SCALE },
   ];
 
-  // ── MediaRecorder export ─────────────────────────────────────────────────────
-  function startRecording(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const canvas = canvasRef.current;
-      const video  = videoRef.current;
-      if (!canvas || !video || isRecording) {
-        reject(new Error('Cannot start recording'));
-        return;
+  // ── Professional export: demux → decode → render → encode → mux ──────────────────
+  async function startRecording(): Promise<void> {
+    const canvas = canvasRef.current;
+    const video = videoRef.current;
+
+    if (!canvas || !video || isRecording) {
+      throw new Error('Cannot start recording');
+    }
+
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+    const signal = abortController.signal;
+
+    setIsRecording(true);
+    setRecProgress(0);
+    setRecStatus('Initializing...');
+    console.log('[startRecording] Starting professional MP4 export...');
+
+    try {
+      // Import libraries dynamically
+      const mediabunny = await import('mediabunny');
+
+      const {
+        Output,
+        Mp4OutputFormat,
+        BufferTarget,
+        VideoSample,
+        VideoSampleSource,
+        QUALITY_HIGH,
+      } = mediabunny;
+
+      // @ts-ignore
+      console.log('[startRecording] MP4Box:', MP4Box);
+      // @ts-ignore
+      const MP4BoxFile = MP4Box.createFile();
+      // @ts-ignore
+      console.log('[startRecording] MP4BoxFile created:', MP4BoxFile);
+
+      // Get the video URL - try to get the original URL from videoSrc prop
+      // The proxy URL (/api/proxy?stream=1&...) doesn't work well with mp4box
+      const videoSrc = video.src || video.currentSrc;
+
+      // Extract the original URL from the proxy URL
+      let videoUrl = videoSrc;
+      if (videoSrc.includes('/api/proxy')) {
+        try {
+          const urlParam = new URL(videoSrc, window.location.origin).searchParams.get('url');
+          if (urlParam) {
+            videoUrl = decodeURIComponent(urlParam);
+            console.log('[startRecording] Using original URL instead of proxy');
+          }
+        } catch (e) {
+          console.warn('[startRecording] Could not extract original URL from proxy URL');
+        }
       }
 
-      const duration = isFinite(video.duration) && video.duration > 0
-        ? video.duration
-        : 30;
-
-      // Prefer MP4 if the browser supports it, otherwise fall back to WebM.
-      let mimeType = 'video/webm';
-      const candidates = [
-        'video/mp4;codecs=avc1,mp4a.40.2',
-        'video/mp4;codecs=h264,aac',
-        'video/mp4',
-        'video/webm;codecs=vp9',
-        'video/webm;codecs=vp8',
-        'video/webm',
-      ];
-      for (const t of candidates) {
-        if (MediaRecorder.isTypeSupported(t)) { mimeType = t; break; }
+      if (!videoUrl) {
+        throw new Error('No video source URL available');
       }
-      // Always use .mp4 extension (browser may record as webm internally)
-      const fileExt = 'mp4';
 
-      // Capture video stream from canvas
-      const canvasStream = canvas.captureStream(30);
-      
-      // Create a combined stream with both video and audio
-      const combinedStream = new MediaStream();
-      
-      // Add video tracks from canvas
-      canvasStream.getVideoTracks().forEach(track => combinedStream.addTrack(track));
-      
-      // Add audio tracks from video element
+      console.log('[startRecording] Video URL:', videoUrl);
+      setRecStatus('Downloading video file...');
+
+      // Fetch the video file as ArrayBuffer
+      let arrayBuffer: ArrayBuffer;
       try {
-        // @ts-ignore - captureStream exists on HTMLMediaElement but may not be in all type definitions
-        const audioStream = video.captureStream ? video.captureStream() : video.mozCaptureStream?.();
-        if (audioStream) {
-          audioStream.getAudioTracks().forEach((track: MediaStreamTrack) => combinedStream.addTrack(track));
+        const response = await fetch(videoUrl);
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
-      } catch (e) {
-        console.warn('Could not capture audio:', e);
+        arrayBuffer = await response.arrayBuffer();
+        console.log('[startRecording] Video fetched, size:', arrayBuffer.byteLength);
+      } catch (fetchError) {
+        console.error('[startRecording] Fetch error:', fetchError);
+        throw new Error(`Failed to download video: ${fetchError instanceof Error ? fetchError.message : 'Unknown error'}`);
       }
 
-      const recorder = new MediaRecorder(combinedStream, { mimeType, videoBitsPerSecond: 8_000_000 });
-      recorderRef.current = recorder;
-      const chunks: Blob[] = [];
-      
-      // Reset cancelled flag at the start of recording
-      recordingCancelledRef.current = false;
+      // Demux with mp4box.js
+      setRecStatus('Parsing video file...');
+      console.log('[startRecording] Demuxing with mp4box...');
 
-      recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
-      recorder.onstop = () => {
-        // Only download if recording wasn't cancelled
-        if (!recordingCancelledRef.current) {
-          const blob = new Blob(chunks, { type: mimeType });
-          const url  = URL.createObjectURL(blob);
-          Object.assign(document.createElement('a'), {
-            href: url,
-            download: `row-${String(rowNumber + 1).padStart(2, '0')}-${videoId ?? 'export'}.${fileExt}`,
-          }).click();
-          URL.revokeObjectURL(url);
+      // Set up sample tracking
+      let videoSamples: Array<{ data: Uint8Array; timestamp: number; duration: number; isKeyframe: boolean }> = [];
+      let audioSamples: Array<{ data: Uint8Array; timestamp: number; duration: number }> = [];
+      let videoTrackId: number | null = null;
+      let audioTrackId: number | null = null;
+      let videoTimescale = 90000;
+      let audioTimescale = 44100;
+      let samplesReady = false;
+
+      // Set up mp4box callbacks
+      MP4BoxFile.onReady = (info: any) => {
+        console.log('[startRecording] MP4 onReady - info:', info);
+        setRecStatus('Parsing video file...');
+
+        // Find video and audio tracks
+        for (const track of info.tracks || []) {
+          console.log('[startRecording] Track:', track.id, track.codec, track.type);
+          if (track.type === 'video' && !videoTrackId) {
+            videoTrackId = track.id;
+            videoTimescale = track.timescale || 90000;
+          }
+          if (track.type === 'audio' && !audioTrackId) {
+            audioTrackId = track.id;
+            audioTimescale = track.timescale || 44100;
+          }
         }
-        setIsRecording(false);
-        setRecProgress(0);
-        // Mute and pause the video after recording
+
+        console.log('[startRecording] Video track ID:', videoTrackId, 'Audio track ID:', audioTrackId);
+
+        // Start extracting samples
+        if (videoTrackId) {
+          MP4BoxFile.setExtractionOptions(videoTrackId, null, { nbSamples: Infinity });
+        }
+        if (audioTrackId) {
+          MP4BoxFile.setExtractionOptions(audioTrackId, null, { nbSamples: Infinity });
+        }
+        MP4BoxFile.start();
+      };
+
+      MP4BoxFile.onSamples = (id: number, user: any, samples: any[]) => {
+        console.log('[startRecording] onSamples called - track ID:', id, 'sample count:', samples.length);
+        if (id === videoTrackId) {
+          for (const sample of samples) {
+            // sample.data is already a Uint8Array in mp4box
+            videoSamples.push({
+              data: new Uint8Array(sample.data), // Clone to prevent reference issues
+              timestamp: sample.cts / videoTimescale,
+              duration: sample.duration / videoTimescale,
+              isKeyframe: sample.is_sync,
+            });
+          }
+          console.log('[startRecording] Video samples total:', videoSamples.length);
+        }
+        if (id === audioTrackId) {
+          for (const sample of samples) {
+            // sample.data is already a Uint8Array in mp4box
+            audioSamples.push({
+              data: new Uint8Array(sample.data), // Clone to prevent reference issues
+              timestamp: sample.cts / audioTimescale,
+              duration: sample.duration / audioTimescale,
+            });
+          }
+          console.log('[startRecording] Audio samples total:', audioSamples.length);
+        }
+      };
+
+      // Append the buffer and parse
+      console.log('[startRecording] Appending buffer to mp4box...');
+      const arrayBufferCopy = arrayBuffer.slice(0);
+
+      // Check file header to see if it's a valid MP4
+      const header = new Uint8Array(arrayBufferCopy.slice(0, 12));
+      console.log('[startRecording] File header:', Array.from(header).map(b => b.toString(16).padStart(2, '0')).join(' '));
+      // MP4 files start with FTYP box (usually 00 00 00 XX 66 74 79 70)
+
+      // Set up error handler for mp4box
+      // @ts-ignore
+      MP4BoxFile.onError = (error: any) => {
+        console.error('[startRecording] MP4Box error:', error);
+      };
+
+      try {
+        // mp4box requires the buffer to have a fileStart property
+        // @ts-ignore
+        arrayBufferCopy.fileStart = 0;
+        // @ts-ignore
+        const offset = MP4BoxFile.appendBuffer(arrayBufferCopy);
+        console.log('[startRecording] appendBuffer returned offset:', offset);
+
+        console.log('[startRecording] Calling flush...');
+        // @ts-ignore
+        MP4BoxFile.flush();
+
+        console.log('[startRecording] Flush completed, waiting for onReady callback...');
+      } catch (e) {
+        console.error('[startRecording] Error during mp4box append/flush:', e);
+        throw new Error(`MP4 parsing error: ${e instanceof Error ? e.message : 'Unknown error'}`);
+      }
+
+      // Wait for samples to be extracted (with timeout)
+      console.log('[startRecording] Waiting for sample extraction...');
+      const maxWaitTime = 10000; // 10 seconds
+      const startTime = Date.now();
+
+      await new Promise<void>((resolve, reject) => {
+        const checkInterval = setInterval(() => {
+          const elapsed = Date.now() - startTime;
+          if (videoSamples.length > 0) {
+            clearInterval(checkInterval);
+            console.log('[startRecording] Samples extracted successfully');
+            resolve();
+          } else if (elapsed > maxWaitTime) {
+            clearInterval(checkInterval);
+            reject(new Error('Timeout waiting for video samples extraction. The video format may not be supported.'));
+          }
+        }, 100);
+      });
+
+      console.log('[startRecording] Video samples extracted:', videoSamples.length);
+      console.log('[startRecording] Audio samples extracted:', audioSamples.length);
+
+      if (videoSamples.length === 0) {
+        throw new Error('No video samples found in file - the video may be corrupted or in an unsupported format');
+      }
+
+      // Calculate export parameters
+      const lastVideoSample = videoSamples[videoSamples.length - 1];
+      const videoDuration = lastVideoSample.timestamp + lastVideoSample.duration;
+      const outputFps = 30;
+      const totalFrames = Math.floor(videoDuration * outputFps);
+      const frameDuration = 1 / outputFps;
+
+      console.log('[startRecording] Video duration:', videoDuration, 'totalFrames:', totalFrames);
+
+      setRecStatus('Decoding video...');
+
+      // Set up video decoder
+      const decodedFrames: Array<{ frame: VideoFrame; timestamp: number }> = [];
+      let decodeIndex = 0;
+
+      const decoder = new VideoDecoder({
+        output: (frame: VideoFrame) => {
+          decodedFrames.push({ frame, timestamp: frame.timestamp / 1_000_000 });
+          decodeIndex++;
+        },
+        error: (e: Error) => {
+          console.error('[VideoDecoder] error:', e);
+        },
+      });
+
+      // Get the video track to extract codec description
+      // @ts-ignore
+      const videoTrack = MP4BoxFile.getTrackById(videoTrackId);
+      console.log('[startRecording] Video track:', videoTrack);
+      // Log all properties of videoTrack
+      // @ts-ignore
+      for (const key in videoTrack) {
+        try {
+          // @ts-ignore
+          console.log('[startRecording] videoTrack.' + key + ':', typeof videoTrack[key]);
+        } catch (e) {}
+      }
+
+      // Try to get the AVC decoder configuration record
+      let description: Uint8Array | undefined;
+
+      // Method 1: Try mp4box's getSampleDescription
+      // @ts-ignore
+      if (typeof MP4BoxFile.getSampleDescription === 'function') {
+        // @ts-ignore
+        const sampleDescriptions = MP4BoxFile.getSampleDescription(videoTrackId);
+        console.log('[startRecording] Sample descriptions:', sampleDescriptions);
+        if (sampleDescriptions && sampleDescriptions[0]) {
+          console.log('[startRecording] Sample desc[0]:', sampleDescriptions[0]);
+          // @ts-ignore
+          description = sampleDescriptions[0].avcC?.config || sampleDescriptions[0].avcC;
+        }
+      }
+
+      // Method 2: Try accessing through track structure (stsd entries)
+      if (!description) {
+        try {
+          // @ts-ignore
+          const stsd = videoTrack?.mdia?.minf?.stbl?.stsd;
+          console.log('[startRecording] stsd:', stsd);
+          // @ts-ignore
+          const entries = stsd?.entries;
+          console.log('[startRecording] stsd.entries:', entries);
+          if (entries && entries[0]) {
+            // @ts-ignore
+            const avcC = entries[0].avcC;
+            if (avcC) {
+              // @ts-ignore
+              console.log('[startRecording] avcC.config:', avcC.config);
+              // @ts-ignore
+              console.log('[startRecording] avcC.data:', avcC.data);
+              // @ts-ignore
+              console.log('[startRecording] avcC.size:', avcC.size);
+              // @ts-ignore
+              console.log('[startRecording] avcC.start:', avcC.start);
+              // @ts-ignore
+              console.log('[startRecording] avcC.fileStart:', avcC.fileStart);
+              // @ts-ignore
+              console.log('[startRecording] avcC.hdr_size:', avcC.hdr_size);
+              // @ts-ignore
+              console.log('[startRecording] avcC.subarray:', typeof avcC.subarray);
+
+              // The config is typically a Uint8Array stored in avcC.config
+              // @ts-ignore
+              if (avcC.config && avcC.config.length > 0) {
+                // @ts-ignore
+                description = new Uint8Array(avcC.config);
+                console.log('[startRecording] Got config from avcC.config, length:', description.length);
+              }
+              // Try using subarray if available
+              // @ts-ignore
+              else if (typeof avcC.subarray === 'function') {
+                // @ts-ignore
+                description = avcC.subarray();
+                console.log('[startRecording] Got config from avcC.subarray, length:', description.length);
+              }
+              // If avcC has a start position and size, read from original buffer
+              // @ts-ignore
+              else if (typeof avcC.start !== 'undefined' && avcC.size) {
+                // @ts-ignore
+                const start = avcC.start;
+                // @ts-ignore
+                const size = avcC.size;
+                // The start position includes the 8-byte box header (4 bytes size + 4 bytes type "avcC")
+                // The actual AVC decoder configuration record starts after the header
+                // We need to skip the 8-byte header to get the actual config
+                const headerSize = 8;
+                const configStart = start + headerSize;
+                const configSize = size - headerSize;
+                const configData = new Uint8Array(arrayBuffer, configStart, configSize);
+                description = configData;
+                console.log('[startRecording] Got config from raw buffer at', configStart, 'size', configSize, 'length:', description.length);
+                console.log('[startRecording] Config data (first 20 bytes):', Array.from(description.slice(0, Math.min(20, description.length))).map(b => b.toString(16).padStart(2, '0')).join(' '));
+              }
+            }
+          }
+        } catch (e) {
+          console.log('[startRecording] Error accessing stsd:', e);
+        }
+      }
+
+      // Method 3: Try description property on codec
+      if (!description) {
+        // @ts-ignore
+        description = videoTrack?.codec?.description;
+      }
+
+      console.log('[startRecording] AVC decoder config:', description ? 'found, length=' + description.length : 'not found');
+
+      // If still no description, try to extract from the first sample's data
+      // The AVC decoder configuration is often at the beginning of H.264 streams
+      if (!description) {
+        console.log('[startRecording] Trying to extract description from samples...');
+        // Find first keyframe sample
+        const firstKeyframe = videoSamples.find(s => s.isKeyframe);
+        if (firstKeyframe) {
+          // The AVC decoder configuration record starts with 0x00 0x00 0x00 0x01 followed by SPS
+          // Let's try to find it in the sample data
+          const data = firstKeyframe.data;
+          console.log('[startRecording] First keyframe data (first 20 bytes):', Array.from(data.slice(0, 20)).map(b => b.toString(16).padStart(2, '0')).join(' '));
+        }
+      }
+
+      // Configure decoder with the proper codec string and description
+      // The codec is avc1.64001f which means H.264 High Profile Level 3.1
+      const decoderConfig: VideoDecoderConfig = {
+        codec: 'avc1.64001F',
+        codedWidth: 1080,
+        codedHeight: 1920,
+        // @ts-ignore - description is required for AVC H.264
+        description: description,
+      };
+
+      const isSupported = await VideoDecoder.isConfigSupported(decoderConfig);
+      console.log('[startRecording] Decoder config supported:', isSupported.supported);
+
+      decoder.configure(decoderConfig);
+
+      // Decode all video samples
+      for (let i = 0; i < videoSamples.length; i++) {
+        if (signal.aborted) {
+          decoder.close();
+          throw new Error('Cancelled');
+        }
+
+        const sample = videoSamples[i];
+        const chunk = new EncodedVideoChunk({
+          type: sample.isKeyframe ? 'key' : 'delta',
+          timestamp: sample.timestamp * 1_000_000,
+          data: sample.data,
+        });
+
+        await decoder.decode(chunk);
+        setRecProgress(0.1 + (i / videoSamples.length) * 0.3);
+      }
+
+      await decoder.flush();
+      decoder.close();
+
+      console.log('[startRecording] Decoded frames:', decodedFrames.length);
+
+      setRecStatus('Rendering frames...');
+
+      // Create Mediabunny output
+      const output = new Output({
+        format: new Mp4OutputFormat(),
+        target: new BufferTarget(),
+      });
+
+      // Set up video encoder
+      const videoSource = new VideoSampleSource({
+        codec: 'avc',
+        bitrate: QUALITY_HIGH,
+      });
+      output.addVideoTrack(videoSource);
+
+      // TODO: Set up audio passthrough
+      // Audio requires extracting AAC samples and passing to EncodedAudioPacketSource
+      // Skipping for now to focus on video export
+
+      await output.start();
+
+      // Create offscreen canvas for rendering
+      const offscreenCanvas = new OffscreenCanvas(CANVAS_W, CANVAS_H);
+      const offscreenCtx = offscreenCanvas.getContext('2d')!;
+
+      // Log for debugging
+      if (decodedFrames.length > 0) {
+        const firstFrame = decodedFrames[0].frame;
+        // @ts-ignore
+        console.log('[startRecording] First frame dimensions:', firstFrame.codedWidth, 'x', firstFrame.codedHeight);
+      }
+
+      // Render and encode each output frame
+      for (let frameIdx = 0; frameIdx < totalFrames; frameIdx++) {
+        if (signal.aborted) {
+          await output.finalize();
+          throw new Error('Cancelled');
+        }
+
+        const targetTimestamp = frameIdx * frameDuration;
+
+        // Find the nearest decoded frame
+        let sourceFrame = decodedFrames[0];
+        for (const f of decodedFrames) {
+          if (f.timestamp <= targetTimestamp) {
+            sourceFrame = f;
+          } else {
+            break;
+          }
+        }
+
+        // Clear canvas
+        offscreenCtx.clearRect(0, 0, CANVAS_W, CANVAS_H);
+
+        // Get current crop box and scale
+        const box = boxRef.current;
+        const scale = videoScaleRef.current;
+
+        // Draw background (black)
+        offscreenCtx.fillStyle = '#000';
+        offscreenCtx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+
+        // Draw decoded video frame
+        // @ts-ignore
+        const frameW = sourceFrame.frame.codedWidth || 1080;
+        // @ts-ignore
+        const frameH = sourceFrame.frame.codedHeight || 1920;
+
+        // Calculate scale to fit video into the crop box
+        const scaleX = box.w / frameW;
+        const scaleY = box.h / frameH;
+        const videoScale = Math.min(scaleX, scaleY) * scale;
+
+        const drawW = frameW * videoScale;
+        const drawH = frameH * videoScale;
+
+        // Center in crop box
+        const dx = box.x + (box.w - drawW) / 2;
+        const dy = box.y + (box.h - drawH) / 2;
+
+        // Clip and draw video
+        offscreenCtx.save();
+        offscreenCtx.beginPath();
+        offscreenCtx.rect(box.x, box.y, box.w, box.h);
+        offscreenCtx.clip();
+        offscreenCtx.drawImage(sourceFrame.frame, dx, dy, drawW, drawH);
+        offscreenCtx.restore();
+
+        // Draw header overlay (matching main canvas)
+        const HEADER_PADDING_X = 32;
+        const HEADER_PADDING_TOP = 14;
+        const BASE_HEADER_HEIGHT = 110;
+        const CAPTION_LINE_HEIGHT = 60;
+        const CAPTION_TOP_PADDING = 80;
+
+        // Count caption lines for header height calculation
+        const countCaptionLines = (ctx: CanvasRenderingContext2D): number => {
+          if (!overlayCaption) return 0;
+          ctx.font = '400 42px Chirp, "Comic Sans MS", cursive';
+          const maxWidth = CANVAS_W - HEADER_PADDING_X * 2;
+          const userLines = overlayCaption.split('\n');
+          let totalLines = 0;
+          for (const userLine of userLines) {
+            if (!userLine) {
+              totalLines++;
+              continue;
+            }
+            const words = userLine.split(' ');
+            let line = '';
+            for (const word of words) {
+              const testLine = line + word + ' ';
+              if (ctx.measureText(testLine).width > maxWidth && line !== '') {
+                totalLines++;
+                line = word + ' ';
+              } else {
+                line = testLine;
+              }
+            }
+            if (line) totalLines++;
+          }
+          return totalLines;
+        };
+
+        const captionLines = countCaptionLines(offscreenCtx);
+        const headerHeight = overlayCaption
+          ? BASE_HEADER_HEIGHT + CAPTION_TOP_PADDING + (captionLines * CAPTION_LINE_HEIGHT)
+          : BASE_HEADER_HEIGHT;
+
+        const headerY = Math.max(0, box.y - headerHeight + 16);
+        const padX = HEADER_PADDING_X;
+        const padY = HEADER_PADDING_TOP;
+        const cx = 0; // Header starts at left edge
+        const cy = headerY;
+        const cw = CANVAS_W;
+
+        // Header background
+        offscreenCtx.fillStyle = '#000';
+        offscreenCtx.fillRect(0, headerY, CANVAS_W, headerHeight);
+
+        // Fonts and colors
+        const nameFont = '700 44px Chirp, "Comic Sans MS", cursive';
+        const metaFont = '400 32px Chirp, "Comic Sans MS", cursive';
+        const nameColor = 'rgb(231, 233, 234)';
+        const metaColor = 'rgb(113, 118, 123)';
+        const lineH = 50;
+        const baselineName = cy + padY + lineH;
+        const handleBaseline = baselineName + 48;
+
+        // Logo on the left, vertically centered
+        const logoHeight = 96;
+        const textCenterY = (baselineName + handleBaseline) / 2;
+        const logoX = cx + padX;
+        let logo = logoImgRef.current;
+        if (!logo) {
+          logo = new Image();
+          logo.src = '/templatelogo.png';
+          logoImgRef.current = logo;
+        }
+
+        let logoWidth = logoHeight;
+        if (logo.complete && logo.width && logo.height) {
+          const logoAspectRatio = logo.width / logo.height;
+          logoWidth = logoHeight * logoAspectRatio;
+          const logoY = textCenterY - logoHeight / 2 - 10;
+          offscreenCtx.drawImage(logo, logoX, logoY, logoWidth, logoHeight);
+        }
+
+        // First line: display name + verified badge
+        let left = logoX + logoWidth + 16;
+
+        // Display name
+        offscreenCtx.font = nameFont;
+        offscreenCtx.fillStyle = nameColor;
+        offscreenCtx.fillText(overlayDisplayName, left, baselineName);
+        left += offscreenCtx.measureText(overlayDisplayName).width + 6;
+
+        // Verified badge
+        if (overlayVerified) {
+          const size = 36;
+          const badgeX = left;
+          const nameCenterY = baselineName - 22;
+          const badgeY = nameCenterY - size / 2 + 8;
+          let img = verifiedImgRef.current;
+          if (!img) {
+            img = new Image();
+            img.src = `data:image/svg+xml;utf8,${encodeURIComponent(VERIFIED_TICK_SVG)}`;
+            verifiedImgRef.current = img;
+          }
+          if (img.complete) {
+            offscreenCtx.drawImage(img, badgeX, badgeY, size, size);
+          }
+          left += size + 12;
+        }
+
+        // Second line: @handle
+        offscreenCtx.font = metaFont;
+        offscreenCtx.fillStyle = metaColor;
+        const handleLeft = logoX + logoWidth + 16;
+        offscreenCtx.fillText(overlayHandle, handleLeft, handleBaseline);
+
+        // Caption with proper newline handling
+        if (overlayCaption) {
+          const captionFont = '400 42px Chirp, "Comic Sans MS", cursive';
+          const captionColor = 'rgb(231, 233, 234)';
+          const captionBaseline = handleBaseline + CAPTION_TOP_PADDING;
+          const captionLeft = cx + padX;
+
+          offscreenCtx.font = captionFont;
+          offscreenCtx.fillStyle = captionColor;
+
+          const userLines = overlayCaption.split('\n');
+          const maxWidth = cw - padX * 2;
+          let y = captionBaseline;
+
+          for (let lineIndex = 0; lineIndex < userLines.length; lineIndex++) {
+            const userLine = userLines[lineIndex];
+            if (!userLine) {
+              y += CAPTION_LINE_HEIGHT;
+              continue;
+            }
+
+            const words = userLine.split(' ');
+            let line = '';
+
+            for (let i = 0; i < words.length; i++) {
+              const testLine = line + words[i] + ' ';
+              const metrics = offscreenCtx.measureText(testLine);
+
+              if (metrics.width > maxWidth && i > 0) {
+                offscreenCtx.fillText(line, captionLeft, y);
+                line = words[i] + ' ';
+                y += CAPTION_LINE_HEIGHT;
+              } else {
+                line = testLine;
+              }
+            }
+            offscreenCtx.fillText(line, captionLeft, y);
+            y += CAPTION_LINE_HEIGHT;
+          }
+        }
+
+        // Market card (full rendering like main canvas)
+        if (tag?.trim() && marketData && marketData.markets && marketData.markets.length > 0) {
+          const market = marketData.markets[0];
+          const boxY = box.y + box.h + 30;
+          const boxHeight = 140;
+          const boxPadding = 60;
+          const radius = 16;
+          const boxX = boxPadding;
+          const boxWidth = CANVAS_W - boxPadding * 2;
+
+          // Rounded rectangle background
+          offscreenCtx.fillStyle = '#000';
+          offscreenCtx.strokeStyle = 'rgba(113, 118, 123, 0.5)';
+          offscreenCtx.lineWidth = 2;
+
+          offscreenCtx.beginPath();
+          offscreenCtx.moveTo(boxX + radius, boxY);
+          offscreenCtx.lineTo(boxX + boxWidth - radius, boxY);
+          offscreenCtx.quadraticCurveTo(boxX + boxWidth, boxY, boxX + boxWidth, boxY + radius);
+          offscreenCtx.lineTo(boxX + boxWidth, boxY + boxHeight - radius);
+          offscreenCtx.quadraticCurveTo(boxX + boxWidth, boxY + boxHeight, boxX + boxWidth - radius, boxY + boxHeight);
+          offscreenCtx.lineTo(boxX + radius, boxY + boxHeight);
+          offscreenCtx.quadraticCurveTo(boxX, boxY + boxHeight, boxX, boxY + boxHeight - radius);
+          offscreenCtx.lineTo(boxX, boxY + radius);
+          offscreenCtx.quadraticCurveTo(boxX, boxY, boxX + radius, boxY);
+          offscreenCtx.closePath();
+          offscreenCtx.fill();
+          offscreenCtx.stroke();
+
+          const textPadding = 40;
+          const imageSize = 80;
+          const imageMargin = 25;
+
+          let textStartX = boxX + textPadding;
+
+          // Market image with rounded corners
+          if (marketImgRef.current && marketImgLoadedRef.current) {
+            const img = marketImgRef.current;
+            const imgX = boxX + textPadding;
+            const imgY = boxY + (boxHeight - imageSize) / 2;
+
+            offscreenCtx.save();
+            offscreenCtx.beginPath();
+            const imgRadius = 12;
+            offscreenCtx.moveTo(imgX + imgRadius, imgY);
+            offscreenCtx.lineTo(imgX + imageSize - imgRadius, imgY);
+            offscreenCtx.quadraticCurveTo(imgX + imageSize, imgY, imgX + imageSize, imgY + imgRadius);
+            offscreenCtx.lineTo(imgX + imageSize, imgY + imageSize - imgRadius);
+            offscreenCtx.quadraticCurveTo(imgX + imageSize, imgY + imageSize, imgX + imageSize - imgRadius, imgY + imageSize);
+            offscreenCtx.lineTo(imgX + imgRadius, imgY + imageSize);
+            offscreenCtx.quadraticCurveTo(imgX, imgY + imageSize, imgX, imgY + imageSize - imgRadius);
+            offscreenCtx.lineTo(imgX, imgY + imgRadius);
+            offscreenCtx.quadraticCurveTo(imgX, imgY, imgX + imgRadius, imgY);
+            offscreenCtx.closePath();
+            offscreenCtx.clip();
+
+            offscreenCtx.drawImage(img, imgX, imgY, imageSize, imageSize);
+            offscreenCtx.restore();
+
+            textStartX = imgX + imageSize + imageMargin;
+          }
+
+          // Title with 2-line wrapping
+          const maxTextWidth = 420;
+          offscreenCtx.font = '600 28px system-ui, sans-serif';
+          offscreenCtx.fillStyle = 'rgb(231, 233, 234)';
+          offscreenCtx.textAlign = 'left';
+
+          const fullText = marketData.title;
+          const fullTextWidth = offscreenCtx.measureText(fullText).width;
+          const ellipsis = '...';
+          const ellipsisWidth = offscreenCtx.measureText(ellipsis).width;
+
+          if (fullTextWidth <= maxTextWidth) {
+            const textY = boxY + boxHeight / 2 + 8;
+            offscreenCtx.fillText(fullText, textStartX, textY);
+          } else {
+            const lineHeight = 34;
+            const totalTextHeight = lineHeight * 2;
+            const textY = boxY + (boxHeight - totalTextHeight) / 2 + 24;
+            const words = fullText.split(' ');
+            let line1 = '';
+            let line2 = '';
+
+            for (const word of words) {
+              const testLine1 = line1 + (line1 ? ' ' : '') + word;
+              const line1Width = offscreenCtx.measureText(testLine1).width;
+
+              if (line1Width <= maxTextWidth) {
+                line1 = testLine1;
+              } else {
+                const testLine2 = line2 + (line2 ? ' ' : '') + word;
+                const line2Width = offscreenCtx.measureText(testLine2).width;
+
+                if (line2Width <= maxTextWidth - ellipsisWidth) {
+                  line2 = testLine2;
+                } else {
+                  break;
+                }
+              }
+            }
+
+            offscreenCtx.fillText(line1, textStartX, textY);
+            if (line2) {
+              offscreenCtx.fillText(line2, textStartX, textY + 34);
+            } else {
+              const truncatedWidth = offscreenCtx.measureText(line1).width;
+              if (truncatedWidth > maxTextWidth - ellipsisWidth) {
+                let truncatedLine = line1;
+                while (offscreenCtx.measureText(truncatedLine + ellipsis).width > maxTextWidth) {
+                  truncatedLine = truncatedLine.slice(0, -1);
+                }
+                offscreenCtx.fillText(truncatedLine + ellipsis, textStartX, textY);
+              } else {
+                offscreenCtx.fillText(line1, textStartX, textY);
+              }
+            }
+          }
+
+          // Odds (percentage + payout) and banner
+          if (market.yesBid) {
+            const bannerReservedWidth = 240;
+            const oddsColumnEnd = boxX + boxWidth - textPadding - bannerReservedWidth;
+
+            const oddsValue = parseFloat(market.yesBid) * 100;
+            const oddsText = Math.round(oddsValue) + '%';
+            const payoutValue = (100 / oddsValue) * 100;
+            const payoutAmount = Math.round(payoutValue);
+
+            offscreenCtx.font = '400 16px system-ui, sans-serif';
+            const greenText = '$' + payoutAmount;
+            const prefix = '$100 → ';
+            const payoutLineWidth = offscreenCtx.measureText(prefix + greenText).width;
+
+            // Percentage
+            offscreenCtx.font = '700 60px system-ui, sans-serif';
+            offscreenCtx.fillStyle = 'rgb(231, 233, 234)';
+            const oddsY = boxY + boxHeight / 2 + 4;
+            const percentageWidth = offscreenCtx.measureText(oddsText).width;
+            const percentageX = oddsColumnEnd - (payoutLineWidth / 2) + (percentageWidth / 2);
+            offscreenCtx.textAlign = 'right';
+            offscreenCtx.fillText(oddsText, percentageX, oddsY);
+
+            // Payout with mixed colors
+            offscreenCtx.font = '400 20px system-ui, sans-serif';
+            const payoutY = oddsY + 34;
+
+            const greenWidth = offscreenCtx.measureText(greenText).width;
+
+            offscreenCtx.fillStyle = 'rgb(0, 186, 124)';
+            offscreenCtx.fillText(greenText, oddsColumnEnd, payoutY);
+
+            offscreenCtx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+            offscreenCtx.fillText(prefix, oddsColumnEnd - greenWidth, payoutY);
+
+            offscreenCtx.textAlign = 'left';
+
+            // Sonotrade banner
+            let banner = bannerImgRef.current;
+            if (!banner) {
+              banner = new Image();
+              banner.src = '/banner.png';
+              bannerImgRef.current = banner;
+            }
+
+            if (banner.complete && banner.width && banner.height) {
+              const bannerHeight = 55;
+              const bannerAspectRatio = banner.width / banner.height;
+              const bannerWidth = bannerHeight * bannerAspectRatio;
+
+              const textGap = 7;
+              const textHeight = 16;
+              const totalHeight = bannerHeight + textGap + textHeight;
+              const rightMargin = 0;
+
+              const groupY = boxY + (boxHeight - totalHeight) / 2;
+              const maxBannerRight = boxX + boxWidth - textPadding - rightMargin;
+              const bannerX = maxBannerRight - bannerWidth;
+              const bannerY = groupY;
+
+              offscreenCtx.drawImage(banner, bannerX, bannerY, bannerWidth, bannerHeight);
+
+              offscreenCtx.font = '400 17px system-ui, sans-serif';
+              offscreenCtx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+              offscreenCtx.textAlign = 'center';
+              const textX = bannerX + bannerWidth / 2;
+              const textY = bannerY + bannerHeight + textGap + 10;
+              offscreenCtx.fillText('Exclusive access in bio', textX, textY);
+            }
+
+            offscreenCtx.textAlign = 'left';
+          }
+        }
+
+        // Create VideoSample from offscreen canvas
+        const sample = new VideoSample(offscreenCanvas, {
+          timestamp: targetTimestamp,
+          duration: frameDuration,
+        });
+
+        await videoSource.add(sample);
+        sample.close();
+
+        // Update progress
+        setRecProgress(0.4 + (frameIdx / totalFrames) * 0.4);
+      }
+
+      // Clean up decoded frames
+      for (const { frame } of decodedFrames) {
+        frame.close();
+      }
+
+      setRecStatus('Finalizing...');
+      setRecProgress(0.95);
+
+      await output.finalize();
+
+      console.log('[startRecording] Export complete');
+
+      const buffer = output.target.buffer;
+      if (!buffer) {
+        throw new Error('No buffer received from output');
+      }
+
+      const blob = new Blob([buffer], { type: 'video/mp4' });
+
+      // Download
+      const url = URL.createObjectURL(blob);
+      const filename = `row-${String(rowNumber + 1).padStart(2, '0')}-${videoId ?? 'export'}.mp4`;
+      Object.assign(document.createElement('a'), {
+        href: url,
+        download: filename,
+      }).click();
+      URL.revokeObjectURL(url);
+
+      setRecProgress(1);
+    } catch (error) {
+      if (error instanceof Error && error.message !== 'Cancelled') {
+        console.error('[startRecording] Export failed:', error);
+        // Show error to user via status
+        setRecStatus(`Error: ${error.message}`);
+        // Keep the error visible for 3 seconds
+        setTimeout(() => {
+          setRecStatus('');
+        }, 3000);
+        throw error;
+      }
+    } finally {
+      setIsRecording(false);
+      setRecProgress(0);
+      setRecStatus('');
+
+      const video = videoRef.current;
+      if (video) {
         video.muted = true;
         video.pause();
         video.currentTime = 0;
-        resolve();
-      };
-
-      video.currentTime = 0;
-      // Unmute video to capture audio
-      video.muted = false;
-      video.play();
-      recorder.start(100);
-      setIsRecording(true);
-
-      const t0 = Date.now();
-      const iv = setInterval(() => {
-        const p = Math.min((Date.now() - t0) / 1000 / duration, 1);
-        setRecProgress(p);
-        if (p >= 1) { clearInterval(iv); recorder.stop(); }
-      }, 100);
-    });
+        video.loop = true;
+        video.playbackRate = 1.0;
+      }
+      abortControllerRef.current = null;
+    }
   }
 
   function cancelRecording() {
-    const video = videoRef.current;
-    // Set the cancelled flag to prevent download
-    recordingCancelledRef.current = true;
-    recorderRef.current?.stop();
+    abortControllerRef.current?.abort();
     setIsRecording(false);
     setRecProgress(0);
-    // Mute and pause the video after canceling
+    setRecStatus('');
+
+    const video = videoRef.current;
     if (video) {
       video.muted = true;
       video.pause();
       video.currentTime = 0;
+      video.playbackRate = 1.0;
+      video.loop = true;
     }
   }
 
@@ -1329,11 +2131,11 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
           <div className="h-1.5 w-full rounded-full bg-zinc-800 overflow-hidden">
             <div
               className="h-full bg-[#fe2c55] transition-all duration-100"
-              style={{ width: `${recProgress * 100}%` }}
+              style={{ width: `${Math.round(recProgress * 100)}%` }}
             />
           </div>
           <div className="flex justify-between text-xs text-zinc-500">
-            <span>Recording… {Math.round(recProgress * 100)}%</span>
+            <span>{recStatus || `Exporting… ${Math.round(recProgress * 100)}%`}</span>
             <button onClick={cancelRecording} className="text-red-400 hover:text-red-300 transition-colors">
               Cancel
             </button>
