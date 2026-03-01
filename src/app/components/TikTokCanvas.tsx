@@ -27,7 +27,7 @@ const CURSORS: Record<Handle, string> = {
 
 // Header overlay (Twitter/X style) drawn above the video area inside the crop box
 const BASE_HEADER_HEIGHT = 110; // Height without caption
-const CAPTION_LINE_HEIGHT = 60; // Height per caption line
+const CAPTION_LINE_HEIGHT = 55; // Spacing between caption lines
 const CAPTION_TOP_PADDING = 80; // Padding above first caption line
 const HEADER_PADDING_X = 32;
 const HEADER_PADDING_TOP = 14;
@@ -359,9 +359,10 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     // Calculate number of caption lines to determine dynamic header height
     const captionLines = countCaptionLinesFn(ctx);
 
-    // Dynamic header height based on caption lines
+    // Dynamic header height based on CAPTION_LINE_HEIGHT, minus bottom offset to tighten the box
+    const CAPTION_BOTTOM_OFFSET = 18; // Reduce space below last line
     const headerHeight = overlayCaption
-      ? BASE_HEADER_HEIGHT + CAPTION_TOP_PADDING + (captionLines * CAPTION_LINE_HEIGHT)
+      ? BASE_HEADER_HEIGHT + CAPTION_TOP_PADDING + (captionLines * CAPTION_LINE_HEIGHT) - CAPTION_BOTTOM_OFFSET
       : BASE_HEADER_HEIGHT;
 
     // Solid header background
@@ -464,9 +465,17 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
           }
         }
         ctx.fillText(line, captionLeft, y);
-        y += CAPTION_LINE_HEIGHT;
+        // Only advance Y if there are more user lines to process
+        if (lineIndex < userLines.length - 1) {
+          y += CAPTION_LINE_HEIGHT;
+        }
       }
     }
+
+    // Debug: draw red border around header area
+    ctx.strokeStyle = 'red';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(cx, cy, cw, headerHeight);
 
     return headerHeight; // Return the calculated height
   }
@@ -718,12 +727,14 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
 
         // First pass: calculate the header height without drawing
         const captionLines = overlayCaption ? countCaptionLines(ctx) : 0;
+
+        const CAPTION_BOTTOM_OFFSET = 18;
         const headerHeight = overlayCaption
-          ? BASE_HEADER_HEIGHT + CAPTION_TOP_PADDING + (captionLines * CAPTION_LINE_HEIGHT)
+          ? BASE_HEADER_HEIGHT + CAPTION_TOP_PADDING + (captionLines * CAPTION_LINE_HEIGHT) - CAPTION_BOTTOM_OFFSET
           : BASE_HEADER_HEIGHT;
 
         // Header: fixed X, but Y follows the crop box (16px overlap)
-        const headerY = Math.max(0, y - headerHeight + 16);
+        const headerY = Math.max(0, y - headerHeight + 4);
         drawHeaderOnContext({ ctx, cx: 0, cy: headerY, cw: CANVAS_W, countCaptionLinesFn: countCaptionLines });
 
         const vw = video.videoWidth;
@@ -949,7 +960,8 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
         const ctx = canvas.getContext('2d');
         if (ctx) {
           const captionLines = countCaptionLines(ctx);
-          headerHeight = BASE_HEADER_HEIGHT + CAPTION_TOP_PADDING + (captionLines * CAPTION_LINE_HEIGHT);
+          const CAPTION_BOTTOM_OFFSET = 18;
+          headerHeight = BASE_HEADER_HEIGHT + CAPTION_TOP_PADDING + (captionLines * CAPTION_LINE_HEIGHT) - CAPTION_BOTTOM_OFFSET;
         }
       }
     }
@@ -1486,10 +1498,12 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
         // Draw header overlay using reusable function (exact match with main canvas)
         // First calculate header height to position it correctly
         const captionLines = overlayCaption ? countCaptionLines(offscreenCtx) : 0;
+
+        const CAPTION_BOTTOM_OFFSET = 18;
         const headerHeight = overlayCaption
-          ? BASE_HEADER_HEIGHT + CAPTION_TOP_PADDING + (captionLines * CAPTION_LINE_HEIGHT)
+          ? BASE_HEADER_HEIGHT + CAPTION_TOP_PADDING + (captionLines * CAPTION_LINE_HEIGHT) - CAPTION_BOTTOM_OFFSET
           : BASE_HEADER_HEIGHT;
-        const headerY = Math.max(0, box.y - headerHeight + 16);
+        const headerY = Math.max(0, box.y - headerHeight + 4);
         drawHeaderOnContext({ ctx: offscreenCtx, cx: 0, cy: headerY, cw: CANVAS_W, countCaptionLinesFn: countCaptionLines });
 
         // Draw market card using reusable function (exact match with main canvas)
