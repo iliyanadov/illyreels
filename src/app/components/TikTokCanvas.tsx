@@ -1468,33 +1468,32 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
         // Clear canvas
         offscreenCtx.clearRect(0, 0, CANVAS_W, CANVAS_H);
 
-        // Get current crop box and scale
+        // Get current crop box, scale, and offset
         const box = boxRef.current;
-        const scale = videoScaleRef.current;
+        const userScale = videoScaleRef.current;
+        const { x: ox, y: oy } = videoOffsetRef.current;
 
         // Draw background (black)
         offscreenCtx.fillStyle = '#000';
         offscreenCtx.fillRect(0, 0, CANVAS_W, CANVAS_H);
 
-        // Draw decoded video frame
-        // @ts-ignore
-        const frameW = sourceFrame.frame.codedWidth || 1080;
-        // @ts-ignore
-        const frameH = sourceFrame.frame.codedHeight || 1920;
+        // Get original video dimensions (from video element, not decoded frame)
+        // The decoded frame may have different dimensions due to encoding
+        const video = videoRef.current;
+        const vw = video?.videoWidth || 1080;
+        const vh = video?.videoHeight || 1920;
 
-        // Calculate scale to fit video into the crop box
-        const scaleX = box.w / frameW;
-        const scaleY = box.h / frameH;
-        const videoScale = Math.min(scaleX, scaleY) * scale;
+        // Use same scaling logic as main canvas:
+        // Scale to fit VIDEO_TARGET_W (1000px) width or full canvas height
+        const scale = Math.min(VIDEO_TARGET_W / vw, CANVAS_H / vh) * userScale;
+        const drawW = vw * scale;
+        const drawH = vh * scale;
 
-        const drawW = frameW * videoScale;
-        const drawH = frameH * videoScale;
+        // Center in full canvas (not crop box), then apply offset
+        const dx = (CANVAS_W - drawW) / 2 + ox;
+        const dy = (CANVAS_H - drawH) / 2 + oy;
 
-        // Center in crop box
-        const dx = box.x + (box.w - drawW) / 2;
-        const dy = box.y + (box.h - drawH) / 2;
-
-        // Clip and draw video
+        // Clip and draw video to crop box
         offscreenCtx.save();
         offscreenCtx.beginPath();
         offscreenCtx.rect(box.x, box.y, box.w, box.h);
