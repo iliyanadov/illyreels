@@ -472,11 +472,6 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
       }
     }
 
-    // Debug: draw red border around header area
-    ctx.strokeStyle = 'red';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(cx, cy, cw, headerHeight);
-
     return headerHeight; // Return the calculated height
   }
 
