@@ -1049,6 +1049,11 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
         BufferTarget,
         VideoSample,
         VideoSampleSource,
+        EncodedAudioPacketSource,
+        EncodedPacketSink,
+        Input,
+        BlobSource,
+        ALL_FORMATS,
         QUALITY_HIGH,
       } = mediabunny;
 
@@ -1110,6 +1115,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
       let videoTimescale = 90000;
       let audioTimescale = 44100;
       let samplesReady = false;
+      let audioDecoderConfig: Uint8Array | null = null; // AAC AudioSpecificConfig
 
       // Set up mp4box callbacks
       MP4BoxFile.onReady = (info: any) => {
@@ -1130,6 +1136,95 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
         }
 
         console.log('[startRecording] Video track ID:', videoTrackId, 'Audio track ID:', audioTrackId);
+
+        // Extract AAC AudioSpecificConfig from audio track
+        if (audioTrackId) {
+          try {
+            // @ts-ignore
+            const audioSampleDescs = MP4BoxFile.getSampleDescription(audioTrackId);
+            console.log('[startRecording] Audio sample descriptions:', audioSampleDescs);
+            if (audioSampleDescs && audioSampleDescs[0]) {
+              const desc = audioSampleDescs[0];
+              // Log all properties of the description for debugging
+              // @ts-ignore
+              console.log('[startRecording] Audio desc keys:', Object.keys(desc));
+              // @ts-ignore
+              console.log('[startRecording] Audio desc:', desc);
+
+              // Try different paths to find the AudioSpecificConfig
+              // @ts-ignore
+              if (desc.esds) {
+                // @ts-ignore
+                console.log('[startRecording] esds keys:', Object.keys(desc.esds));
+                // @ts-ignore
+                console.log('[startRecording] esds:', desc.esds);
+
+                // Try esds.ESDescriptor.decConfigDescr.decSpecificInfo
+                // @ts-ignore
+                if (desc.esds.ESDescriptor && desc.esds.ESDescriptor.decConfigDescr) {
+                  // @ts-ignore
+                  const decConfig = desc.esds.ESDescriptor.decConfigDescr;
+                  // @ts-ignore
+                  if (decConfig.decSpecificInfo && decConfig.decSpecificInfo.data) {
+                    // @ts-ignore
+                    audioDecoderConfig = new Uint8Array(decConfig.decSpecificInfo.data);
+                    console.log('[startRecording] AAC AudioSpecificConfig extracted from decSpecificInfo, length:', audioDecoderConfig.length);
+                  }
+                  // @ts-ignore
+                  else if (decConfig.decSpecificInfo) {
+                    // @ts-ignore
+                    audioDecoderConfig = new Uint8Array(decConfig.decSpecificInfo);
+                    console.log('[startRecording] AAC AudioSpecificConfig extracted (direct), length:', audioDecoderConfig.length);
+                  }
+                }
+
+                // Fallback: try esds.descriptor directly
+                // @ts-ignore
+                if (!audioDecoderConfig && desc.esds.descriptor) {
+                  // @ts-ignore
+                  audioDecoderConfig = new Uint8Array(desc.esds.descriptor);
+                  console.log('[startRecording] AAC AudioSpecificConfig extracted from descriptor, length:', audioDecoderConfig.length);
+                }
+
+                // Another fallback: try esds.data
+                // @ts-ignore
+                if (!audioDecoderConfig && desc.esds.data) {
+                  // @ts-ignore
+                  audioDecoderConfig = new Uint8Array(desc.esds.data);
+                  console.log('[startRecording] AAC AudioSpecificConfig extracted from esds.data, length:', audioDecoderConfig.length);
+                }
+              }
+
+              // Last resort: try to find any buffer-like property
+              if (!audioDecoderConfig) {
+                // @ts-ignore
+                for (const key in desc) {
+                  // @ts-ignore
+                  const val = desc[key];
+                  if (val && (val instanceof Uint8Array || (val.buffer && val.buffer instanceof ArrayBuffer))) {
+                    // @ts-ignore
+                    audioDecoderConfig = new Uint8Array(val);
+                    console.log('[startRecording] AAC AudioSpecificConfig extracted from', key, ', length:', audioDecoderConfig.length);
+                    break;
+                  }
+                }
+              }
+
+              if (!audioDecoderConfig) {
+                console.warn('[startRecording] Could not extract AAC AudioSpecificConfig, will use default');
+                // Use a default AAC-LC AudioSpecificConfig for 44.1kHz stereo
+                // This is [0x11, 0x90] = AAC-LC, 44.1kHz, stereo
+                audioDecoderConfig = new Uint8Array([0x11, 0x90]);
+                console.log('[startRecording] Using default AAC AudioSpecificConfig');
+              }
+            }
+          } catch (e) {
+            console.warn('[startRecording] Failed to extract audio decoder config:', e);
+            // Use default as fallback
+            audioDecoderConfig = new Uint8Array([0x11, 0x90]);
+            console.log('[startRecording] Using default AAC AudioSpecificConfig after error');
+          }
+        }
 
         // Start extracting samples
         if (videoTrackId) {
@@ -1408,7 +1503,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
 
       console.log('[startRecording] Decoded frames:', decodedFrames.length);
 
-      setRecStatus('Rendering frames...');
+      setRecStatus('Preparing audio...');
 
       // Create Mediabunny output
       const output = new Output({
@@ -1423,9 +1518,64 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
       });
       output.addVideoTrack(videoSource);
 
-      // TODO: Set up audio passthrough
-      // Audio requires extracting AAC samples and passing to EncodedAudioPacketSource
-      // Skipping for now to focus on video export
+      // Set up audio track BEFORE starting output
+      let audioSource: EncodedAudioPacketSource | null = null;
+      let audioPackets: any[] = []; // Store EncodedPackets from mediabunny
+      let audioDecoderConfigForExport: any = null;
+
+      if (audioSamples.length > 0) {
+        console.log('[startRecording] Setting up audio using mediabunny Input...');
+
+        try {
+          // Fetch video as Blob
+          const videoBlob = await fetch(videoSrc).then(r => r.blob());
+
+          // Open with mediabunny Input
+          const input = new Input({
+            source: new BlobSource(videoBlob),
+            formats: ALL_FORMATS,
+          });
+
+          const audioTrack = await input.getPrimaryAudioTrack();
+
+          if (audioTrack) {
+            // Get the decoder config - this is the exact format WebCodecs wants
+            audioDecoderConfigForExport = await audioTrack.getDecoderConfig();
+            console.log('[startRecording] Audio decoderConfig from mediabunny:', audioDecoderConfigForExport);
+
+            // Create EncodedAudioPacketSource and add to output BEFORE start()
+            audioSource = new EncodedAudioPacketSource('aac');
+            output.addAudioTrack(audioSource);
+
+            // Create EncodedPacketSink to iterate packets in decode order
+            const sink = new EncodedPacketSink(audioTrack);
+
+            // Collect all packets using the packets() async generator
+            for await (const packet of sink.packets()) {
+              audioPackets.push(packet);
+            }
+
+            console.log('[startRecording] Collected', audioPackets.length, 'audio packets from mediabunny');
+
+            // Get the first timestamp for alignment
+            const firstTimestamp = audioPackets[0]?.timestamp || 0;
+            console.log('[startRecording] First audio timestamp:', firstTimestamp);
+
+            // Align timestamps to start at 0
+            for (const packet of audioPackets) {
+              packet.timestamp = packet.timestamp - firstTimestamp;
+            }
+
+            // Remove any packets with negative timestamps after alignment
+            audioPackets = audioPackets.filter((p: any) => p.timestamp >= 0);
+            console.log('[startRecording] After alignment and filtering:', audioPackets.length, 'packets');
+          }
+        } catch (audioError) {
+          console.error('[startRecording] Audio setup failed:', audioError);
+        }
+      }
+
+      setRecStatus('Rendering frames...');
 
       await output.start();
 
@@ -1525,6 +1675,25 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
       // Clean up decoded frames
       for (const { frame } of decodedFrames) {
         frame.close();
+      }
+
+      // Add audio packets using stored EncodedPacket objects from mediabunny
+      if (audioSource && audioPackets.length > 0) {
+        setRecStatus('Adding audio...');
+        console.log('[startRecording] Adding', audioPackets.length, 'audio packets...');
+
+        for (let i = 0; i < audioPackets.length; i++) {
+          const packet = audioPackets[i];
+
+          // Pass decoderConfig only on first packet
+          if (i === 0) {
+            await audioSource.add(packet, { decoderConfig: audioDecoderConfigForExport });
+            console.log('[startRecording] Added first audio packet with decoderConfig');
+          } else {
+            await audioSource.add(packet);
+          }
+        }
+        console.log('[startRecording] Audio packets added:', audioPackets.length);
       }
 
       setRecStatus('Finalizing...');
