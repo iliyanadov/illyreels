@@ -336,6 +336,368 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     return captionLines;
   }
 
+  // ── Reusable drawing functions (used by both main canvas and export) ─────────────
+  // These functions draw identically on any CanvasRenderingContext2D
+
+  interface DrawHeaderParams {
+    ctx: CanvasRenderingContext2D;
+    cx: number;
+    cy: number;
+    cw: number;
+    countCaptionLinesFn: (ctx: CanvasRenderingContext2D) => number;
+  }
+
+  function drawHeaderOnContext({ ctx, cx, cy, cw, countCaptionLinesFn }: DrawHeaderParams): number {
+    const padX = HEADER_PADDING_X + 43; // Shift right by 43px
+    const padY = HEADER_PADDING_TOP;
+    const lineH = 50;
+    const nameFont = '600 44px system-ui, sans-serif';
+    const metaFont = '400 40px system-ui, sans-serif';
+    const metaColor = 'rgba(113, 118, 123, 1)';
+    const nameColor = 'rgb(231, 233, 234)';
+
+    // Calculate number of caption lines to determine dynamic header height
+    const captionLines = countCaptionLinesFn(ctx);
+
+    // Dynamic header height based on caption lines
+    const headerHeight = overlayCaption
+      ? BASE_HEADER_HEIGHT + CAPTION_TOP_PADDING + (captionLines * CAPTION_LINE_HEIGHT)
+      : BASE_HEADER_HEIGHT;
+
+    // Solid header background
+    ctx.fillStyle = '#000';
+    ctx.fillRect(cx, cy, cw, headerHeight);
+
+    // Baselines for name and handle
+    const baselineName = cy + padY + lineH;
+    const handleBaseline = baselineName + 48;
+
+    // Logo on the left, vertically centered alongside both lines of text
+    const logoHeight = 96;
+    const textCenterY = (baselineName + handleBaseline) / 2;
+    const logoX = cx + padX;
+    let logo = logoImgRef.current;
+    if (!logo) {
+      logo = new Image();
+      logo.src = '/templatelogo.png';
+      logoImgRef.current = logo;
+    }
+
+    // Calculate logo width based on aspect ratio, or use default
+    let logoWidth = logoHeight; // default to square if image not loaded
+    if (logo.complete && logo.width && logo.height) {
+      const logoAspectRatio = logo.width / logo.height;
+      logoWidth = logoHeight * logoAspectRatio;
+      const logoY = textCenterY - logoHeight / 2 - 10; // Move up by 10px
+      ctx.drawImage(logo, logoX, logoY, logoWidth, logoHeight);
+    }
+
+    // First line: display name + verified badge, to the right of the logo
+    let left = logoX + logoWidth + 16;
+
+    // Display name
+    ctx.font = nameFont;
+    ctx.fillStyle = nameColor;
+    ctx.fillText(overlayDisplayName, left, baselineName);
+    left += ctx.measureText(overlayDisplayName).width + 6;
+
+    // Verified badge (exact X SVG), vertically centered with the display name
+    if (overlayVerified) {
+      const size = 36;
+      const badgeX = left;
+      const nameCenterY = baselineName - 22; // approx vertical center of 44px name
+      const badgeY = nameCenterY - size / 2 + 8;
+      let img = verifiedImgRef.current;
+      if (!img) {
+        img = new Image();
+        img.src = `data:image/svg+xml;utf8,${encodeURIComponent(VERIFIED_TICK_SVG)}`;
+        verifiedImgRef.current = img;
+      }
+      if (img.complete) {
+        ctx.drawImage(img, badgeX, badgeY, size, size);
+      }
+      left += size + 12;
+    }
+
+    // Second line: @handle under the display name, with a bit more spacing
+    ctx.font = metaFont;
+    ctx.fillStyle = metaColor;
+    const handleLeft = logoX + logoWidth + 16;
+    ctx.fillText(overlayHandle, handleLeft, handleBaseline);
+
+    // Caption: below the handle if provided
+    if (overlayCaption) {
+      const captionFont = '400 42px Chirp, "Comic Sans MS", cursive';
+      const captionColor = 'rgb(231, 233, 234)';
+      const captionBaseline = handleBaseline + CAPTION_TOP_PADDING;
+      const captionLeft = cx + padX;
+
+      ctx.font = captionFont;
+      ctx.fillStyle = captionColor;
+
+      // Split by user's explicit newlines first, then wrap each line
+      const userLines = overlayCaption.split('\n');
+      const maxWidth = cw - padX * 2;
+      let y = captionBaseline;
+
+      for (let lineIndex = 0; lineIndex < userLines.length; lineIndex++) {
+        const userLine = userLines[lineIndex];
+        if (!userLine) {
+          // Empty line from user - just advance Y
+          y += CAPTION_LINE_HEIGHT;
+          continue;
+        }
+
+        const words = userLine.split(' ');
+        let line = '';
+
+        for (let i = 0; i < words.length; i++) {
+          const testLine = line + words[i] + ' ';
+          const metrics = ctx.measureText(testLine);
+
+          if (metrics.width > maxWidth && i > 0) {
+            ctx.fillText(line, captionLeft, y);
+            line = words[i] + ' ';
+            y += CAPTION_LINE_HEIGHT;
+          } else {
+            line = testLine;
+          }
+        }
+        ctx.fillText(line, captionLeft, y);
+        y += CAPTION_LINE_HEIGHT;
+      }
+    }
+
+    return headerHeight; // Return the calculated height
+  }
+
+  interface DrawMarketCardParams {
+    ctx: CanvasRenderingContext2D;
+    boxY: number;
+  }
+
+  function drawMarketCardOnContext({ ctx, boxY }: DrawMarketCardParams): void {
+    if (!tag?.trim() || !marketData || !marketData.markets || marketData.markets.length === 0) {
+      return;
+    }
+
+    const market = marketData.markets[0];
+    const boxHeight = 140;
+    const boxPadding = 60;
+    const radius = 16;
+    const boxX = boxPadding;
+    const boxWidth = CANVAS_W - boxPadding * 2;
+
+    // Draw rounded rectangle with black background and gray border
+    ctx.fillStyle = '#000';
+    ctx.strokeStyle = 'rgba(113, 118, 123, 0.5)';
+    ctx.lineWidth = 2;
+
+    // Rounded rectangle path
+    ctx.beginPath();
+    ctx.moveTo(boxX + radius, boxY);
+    ctx.lineTo(boxX + boxWidth - radius, boxY);
+    ctx.quadraticCurveTo(boxX + boxWidth, boxY, boxX + boxWidth, boxY + radius);
+    ctx.lineTo(boxX + boxWidth, boxY + boxHeight - radius);
+    ctx.quadraticCurveTo(boxX + boxWidth, boxY + boxHeight, boxX + boxWidth - radius, boxY + boxHeight);
+    ctx.lineTo(boxX + radius, boxY + boxHeight);
+    ctx.quadraticCurveTo(boxX, boxY + boxHeight, boxX, boxY + boxHeight - radius);
+    ctx.lineTo(boxX, boxY + radius);
+    ctx.quadraticCurveTo(boxX, boxY, boxX + radius, boxY);
+    ctx.closePath();
+
+    ctx.fill();
+    ctx.stroke();
+
+    const textPadding = 40; // Increased internal padding
+    const imageSize = 80; // Increased square image size
+    const imageMargin = 25; // Increased gap between image and text
+
+    // Draw market image if available (using pre-loaded image)
+    let textStartX = boxX + textPadding;
+    if (marketImgRef.current && marketImgLoadedRef.current) {
+      const img = marketImgRef.current;
+      const imgX = boxX + textPadding;
+      const imgY = boxY + (boxHeight - imageSize) / 2; // Vertically center
+
+      // Draw rounded rectangle clip for image
+      ctx.save();
+      ctx.beginPath();
+      const imgRadius = 12; // Increased corner radius to match rectangle
+      ctx.moveTo(imgX + imgRadius, imgY);
+      ctx.lineTo(imgX + imageSize - imgRadius, imgY);
+      ctx.quadraticCurveTo(imgX + imageSize, imgY, imgX + imageSize, imgY + imgRadius);
+      ctx.lineTo(imgX + imageSize, imgY + imageSize - imgRadius);
+      ctx.quadraticCurveTo(imgX + imageSize, imgY + imageSize, imgX + imageSize - imgRadius, imgY + imageSize);
+      ctx.lineTo(imgX + imgRadius, imgY + imageSize);
+      ctx.quadraticCurveTo(imgX, imgY + imageSize, imgX, imgY + imageSize - imgRadius);
+      ctx.lineTo(imgX, imgY + imgRadius);
+      ctx.quadraticCurveTo(imgX, imgY, imgX + imgRadius, imgY);
+      ctx.closePath();
+      ctx.clip();
+
+      ctx.drawImage(img, imgX, imgY, imageSize, imageSize);
+      ctx.restore();
+
+      textStartX = imgX + imageSize + imageMargin;
+    }
+
+    // Calculate max width for text (leave space for odds and banner on right)
+    const maxTextWidth = 420; // Reduced from 450 to make title area slightly narrower
+
+    // Event title (white text) - max 2 lines with ellipsis for truncation
+    ctx.font = '600 28px system-ui, sans-serif'; // Increased from 26px to 28px
+    ctx.fillStyle = 'rgb(231, 233, 234)';
+    ctx.textAlign = 'left'; // Ensure left alignment for title
+
+    const fullText = marketData.title;
+    const fullTextWidth = ctx.measureText(fullText).width;
+    const ellipsis = '...';
+    const ellipsisWidth = ctx.measureText(ellipsis).width;
+
+    if (fullTextWidth <= maxTextWidth) {
+      // Text fits in one line - center it vertically
+      const textY = boxY + boxHeight / 2 + 8; // Vertically centered
+      ctx.fillText(fullText, textStartX, textY);
+    } else {
+      // Text needs wrapping - split into two rows max, with truncation
+      const lineHeight = 34; // Increased from 30px to 34px for more spacing
+      const totalTextHeight = lineHeight * 2; // Two lines
+      const textY = boxY + (boxHeight - totalTextHeight) / 2 + 24; // Center the two-line block
+      const words = fullText.split(' ');
+      let line1 = '';
+      let line2 = '';
+
+      for (const word of words) {
+        // Try adding to line 1
+        const testLine1 = line1 + (line1 ? ' ' : '') + word;
+        const line1Width = ctx.measureText(testLine1).width;
+
+        if (line1Width <= maxTextWidth) {
+          line1 = testLine1;
+        } else {
+          // Line 1 is full, add to line 2
+          const testLine2 = line2 + (line2 ? ' ' : '') + word;
+          const line2Width = ctx.measureText(testLine2).width;
+
+          if (line2Width <= maxTextWidth - ellipsisWidth) {
+            line2 = testLine2;
+          } else {
+            // Line 2 is also full - truncate with ellipsis
+            break;
+          }
+        }
+      }
+
+      // Draw the lines (line2 may have ellipsis)
+      ctx.fillText(line1, textStartX, textY);
+      if (line2) {
+        ctx.fillText(line2, textStartX, textY + 34);
+      } else {
+        // Only one line, add ellipsis if truncated
+        const truncatedWidth = ctx.measureText(line1).width;
+        if (truncatedWidth > maxTextWidth - ellipsisWidth) {
+          // Truncate line1 and add ellipsis
+          let truncatedLine = line1;
+          while (ctx.measureText(truncatedLine + ellipsis).width > maxTextWidth) {
+            truncatedLine = truncatedLine.slice(0, -1);
+          }
+          ctx.fillText(truncatedLine + ellipsis, textStartX, textY);
+        } else {
+          ctx.fillText(line1, textStartX, textY);
+        }
+      }
+    }
+
+    // Draw odds (yesBid) on the right side if available
+    if (market.yesBid) {
+      const bannerReservedWidth = 240; // Space reserved for banner column
+      const oddsColumnEnd = boxX + boxWidth - textPadding - bannerReservedWidth;
+
+      // Convert decimal to percentage (0.01 -> 1%)
+      const oddsValue = parseFloat(market.yesBid) * 100;
+      const oddsText = Math.round(oddsValue) + '%';
+
+      // Calculate payout: (100 / percentage) * 100
+      const payoutValue = (100 / oddsValue) * 100;
+      const payoutAmount = Math.round(payoutValue);
+
+      // Measure payout line width for centering
+      ctx.font = '400 16px system-ui, sans-serif';
+      const greenText = '$' + payoutAmount;
+      const prefix = '$100 → ';
+      const payoutLineWidth = ctx.measureText(prefix + greenText).width;
+
+      // Draw percentage (larger, above and centered over payout)
+      ctx.font = '700 60px system-ui, sans-serif'; // Increased from 48px to 60px
+      ctx.fillStyle = 'rgb(231, 233, 234)';
+      const oddsY = boxY + boxHeight / 2 + 4; // Moved down slightly
+      // Center the percentage above the payout line
+      const percentageWidth = ctx.measureText(oddsText).width;
+      const percentageX = oddsColumnEnd - (payoutLineWidth / 2) + (percentageWidth / 2);
+      ctx.textAlign = 'right';
+      ctx.fillText(oddsText, percentageX, oddsY);
+
+      // Draw payout with mixed colors
+      ctx.font = '400 20px system-ui, sans-serif'; // Increased from 17px to 20px
+      const payoutY = oddsY + 34; // Reduced from 38 to bring closer
+
+      // Measure and draw the full text with green payout
+      const greenWidth = ctx.measureText(greenText).width;
+
+      // Draw "$X" in green (right-aligned)
+      ctx.fillStyle = 'rgb(0, 186, 124)'; // Green color
+      ctx.fillText(greenText, oddsColumnEnd, payoutY);
+
+      // Draw "$100 → " in gray (to the left of green text)
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+      ctx.fillText(prefix, oddsColumnEnd - greenWidth, payoutY);
+
+      ctx.textAlign = 'left'; // Reset alignment
+
+      // Draw Sonotrade banner in its own column on the far right
+      let banner = bannerImgRef.current;
+      if (!banner) {
+        banner = new Image();
+        banner.src = '/banner.png';
+        bannerImgRef.current = banner;
+      }
+
+      if (banner.complete && banner.width && banner.height) {
+        const bannerHeight = 55; // Increased from 50px to 55px
+        const bannerAspectRatio = banner.width / banner.height;
+        const bannerWidth = bannerHeight * bannerAspectRatio;
+
+        // Calculate total height of banner + text + gap
+        const textGap = 7; // Reduced gap between banner and text
+        const textHeight = 16; // Approximate text height (increased for 15px font)
+        const totalHeight = bannerHeight + textGap + textHeight;
+        const rightMargin = 0; // Minimal right margin from rectangle edge
+
+        // Position banner and text as a group, vertically centered
+        const groupY = boxY + (boxHeight - totalHeight) / 2;
+        // Position banner with right margin considered
+        const maxBannerRight = boxX + boxWidth - textPadding - rightMargin;
+        const bannerX = maxBannerRight - bannerWidth;
+        const bannerY = groupY;
+
+        // Draw banner (removed bounds check to debug)
+        ctx.drawImage(banner, bannerX, bannerY, bannerWidth, bannerHeight);
+
+        // Draw "Exclusive access in bio" below the banner
+        ctx.font = '400 17px system-ui, sans-serif';
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.5)'; // White at 50% opacity
+        ctx.textAlign = 'center';
+        const textX = bannerX + bannerWidth / 2; // Center text under banner
+        const textY = bannerY + bannerHeight + textGap + 10;
+        ctx.fillText('Exclusive access in bio', textX, textY);
+      }
+
+      // Reset text alignment to left (default)
+      ctx.textAlign = 'left';
+    }
+  }
+
   // ── Draw loop (black bg + global header + cropped video) ─────────────────────
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -344,165 +706,6 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     const video = v;
     const ctx = canvas.getContext('2d')!;
     let active = true;
-
-    function drawHeader(cx: number, cy: number, cw: number) {
-      const padX = HEADER_PADDING_X + 43; // Shift right by 43px
-      const padY = HEADER_PADDING_TOP;
-      const lineH = 50;
-      const nameFont = '600 44px system-ui, sans-serif';
-      const metaFont = '400 40px system-ui, sans-serif';
-      const metaColor = 'rgba(113, 118, 123, 1)';
-      const nameColor = 'rgb(231, 233, 234)';
-
-      // Calculate number of caption lines to determine dynamic header height
-      let captionLines = 0;
-      if (overlayCaption) {
-        const captionFont = '400 42px Chirp, "Comic Sans MS", cursive';
-        ctx.font = captionFont;
-        const maxWidth = cw - padX * 2;
-
-        // Split by user's explicit newlines first
-        const userLines = overlayCaption.split('\n');
-
-        for (let lineIndex = 0; lineIndex < userLines.length; lineIndex++) {
-          const userLine = userLines[lineIndex];
-          if (!userLine) {
-            // Empty line counts as one line
-            captionLines++;
-            continue;
-          }
-
-          // Count wrapped lines for each user line
-          const words = userLine.split(' ');
-          let line = '';
-          let lineCount = 1; // at least one line per user line
-
-          for (let i = 0; i < words.length; i++) {
-            const testLine = line + words[i] + ' ';
-            const metrics = ctx.measureText(testLine);
-
-            if (metrics.width > maxWidth && i > 0) {
-              lineCount++;
-              line = words[i] + ' ';
-            } else {
-              line = testLine;
-            }
-          }
-          captionLines += lineCount;
-        }
-      }
-
-      // Dynamic header height based on caption lines
-      const headerHeight = overlayCaption 
-        ? BASE_HEADER_HEIGHT + CAPTION_TOP_PADDING + (captionLines * CAPTION_LINE_HEIGHT)
-        : BASE_HEADER_HEIGHT;
-
-      // Solid header background so the header is above the video, not overlaying it
-      ctx.fillStyle = '#000';
-      ctx.fillRect(cx, cy, cw, headerHeight);
-
-      // Baselines for name and handle
-      const baselineName = cy + padY + lineH;
-      const handleBaseline = baselineName + 48;
-
-      // Logo on the left, vertically centered alongside both lines of text
-      const logoHeight = 96;
-      const textCenterY = (baselineName + handleBaseline) / 2;
-      const logoX = cx + padX;
-      let logo = logoImgRef.current;
-      if (!logo) {
-        logo = new Image();
-        logo.src = '/templatelogo.png';
-        logoImgRef.current = logo;
-      }
-      
-      // Calculate logo width based on aspect ratio, or use default
-      let logoWidth = logoHeight; // default to square if image not loaded
-      if (logo.complete && logo.width && logo.height) {
-        const logoAspectRatio = logo.width / logo.height;
-        logoWidth = logoHeight * logoAspectRatio;
-        const logoY = textCenterY - logoHeight / 2 - 10; // Move up by 10px
-        ctx.drawImage(logo, logoX, logoY, logoWidth, logoHeight);
-      }
-
-      // First line: display name + verified badge, to the right of the logo
-      let left = logoX + logoWidth + 16;
-
-      // Display name
-      ctx.font = nameFont;
-      ctx.fillStyle = nameColor;
-      ctx.fillText(overlayDisplayName, left, baselineName);
-      left += ctx.measureText(overlayDisplayName).width + 6;
-
-      // Verified badge (exact X SVG), vertically centered with the display name
-      if (overlayVerified) {
-        const size = 36;
-        const badgeX = left;
-        const nameCenterY = baselineName - 22; // approx vertical center of 44px name
-        const badgeY = nameCenterY - size / 2 + 8;
-        let img = verifiedImgRef.current;
-        if (!img) {
-          img = new Image();
-          img.src = `data:image/svg+xml;utf8,${encodeURIComponent(VERIFIED_TICK_SVG)}`;
-          verifiedImgRef.current = img;
-        }
-        if (img.complete) {
-          ctx.drawImage(img, badgeX, badgeY, size, size);
-        }
-        left += size + 12;
-      }
-
-      // Second line: @handle under the display name, with a bit more spacing
-      ctx.font = metaFont;
-      ctx.fillStyle = metaColor;
-      const handleLeft = logoX + logoWidth + 16;
-      ctx.fillText(overlayHandle, handleLeft, handleBaseline);
-
-      // Caption: below the handle if provided
-      if (overlayCaption) {
-        const captionFont = '400 42px Chirp, "Comic Sans MS", cursive';
-        const captionColor = 'rgb(231, 233, 234)';
-        const captionBaseline = handleBaseline + CAPTION_TOP_PADDING;
-        const captionLeft = cx + padX;
-        
-        ctx.font = captionFont;
-        ctx.fillStyle = captionColor;
-
-        // Split by user's explicit newlines first, then wrap each line
-        const userLines = overlayCaption.split('\n');
-        const maxWidth = cw - padX * 2;
-        let y = captionBaseline;
-
-        for (let lineIndex = 0; lineIndex < userLines.length; lineIndex++) {
-          const userLine = userLines[lineIndex];
-          if (!userLine) {
-            // Empty line from user - just advance Y
-            y += CAPTION_LINE_HEIGHT;
-            continue;
-          }
-
-          const words = userLine.split(' ');
-          let line = '';
-
-          for (let i = 0; i < words.length; i++) {
-            const testLine = line + words[i] + ' ';
-            const metrics = ctx.measureText(testLine);
-
-            if (metrics.width > maxWidth && i > 0) {
-              ctx.fillText(line, captionLeft, y);
-              line = words[i] + ' ';
-              y += CAPTION_LINE_HEIGHT;
-            } else {
-              line = testLine;
-            }
-          }
-          ctx.fillText(line, captionLeft, y);
-          y += CAPTION_LINE_HEIGHT;
-        }
-      }
-
-      return headerHeight; // Return the calculated height
-    }
 
     function draw() {
       if (!active) return;
@@ -513,19 +716,15 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
         const { x, y, w, h } = boxRef.current;
         const { x: ox, y: oy } = videoOffsetRef.current;
 
-        // Calculate header position first to know where to draw it
-        // We need to call drawHeader to get the height, but we'll redraw it at the correct position
-
         // First pass: calculate the header height without drawing
         const captionLines = overlayCaption ? countCaptionLines(ctx) : 0;
-
         const headerHeight = overlayCaption
           ? BASE_HEADER_HEIGHT + CAPTION_TOP_PADDING + (captionLines * CAPTION_LINE_HEIGHT)
           : BASE_HEADER_HEIGHT;
 
-        // Header: fixed X, but Y follows the crop box
-        const headerY = Math.max(0, y - headerHeight + 16);  // 16px overlap with crop box
-        drawHeader(0, headerY, CANVAS_W);
+        // Header: fixed X, but Y follows the crop box (16px overlap)
+        const headerY = Math.max(0, y - headerHeight + 16);
+        drawHeaderOnContext({ ctx, cx: 0, cy: headerY, cw: CANVAS_W, countCaptionLinesFn: countCaptionLines });
 
         const vw = video.videoWidth;
         const vh = video.videoHeight;
@@ -543,225 +742,8 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
         ctx.drawImage(video, dx, dy, drawW, drawH);
         ctx.restore();
 
-        // Draw market data box below the video (only if tag is provided)
-        if (tag?.trim() && marketData && marketData.markets && marketData.markets.length > 0) {
-          const boxY = y + h + 30; // 30px gap below video
-          const boxHeight = 140; // Height of the box
-          const boxPadding = 60; // Padding from edges
-
-          // Draw rounded rectangle with black background and gray border
-          ctx.fillStyle = '#000';
-          ctx.strokeStyle = 'rgba(113, 118, 123, 0.5)';
-          ctx.lineWidth = 2;
-
-          // Rounded rectangle path
-          const radius = 16;
-          const boxX = boxPadding;
-          const boxWidth = CANVAS_W - boxPadding * 2;
-
-          ctx.beginPath();
-          ctx.moveTo(boxX + radius, boxY);
-          ctx.lineTo(boxX + boxWidth - radius, boxY);
-          ctx.quadraticCurveTo(boxX + boxWidth, boxY, boxX + boxWidth, boxY + radius);
-          ctx.lineTo(boxX + boxWidth, boxY + boxHeight - radius);
-          ctx.quadraticCurveTo(boxX + boxWidth, boxY + boxHeight, boxX + boxWidth - radius, boxY + boxHeight);
-          ctx.lineTo(boxX + radius, boxY + boxHeight);
-          ctx.quadraticCurveTo(boxX, boxY + boxHeight, boxX, boxY + boxHeight - radius);
-          ctx.lineTo(boxX, boxY + radius);
-          ctx.quadraticCurveTo(boxX, boxY, boxX + radius, boxY);
-          ctx.closePath();
-
-          ctx.fill();
-          ctx.stroke();
-          const market = marketData.markets[0]; // Use first market
-          const textPadding = 40; // Increased internal padding
-          const imageSize = 80; // Increased square image size
-          const imageMargin = 25; // Increased gap between image and text
-          
-          // Draw market image if available (using pre-loaded image)
-          let textStartX = boxX + textPadding;
-          if (marketImgRef.current && marketImgLoadedRef.current) {
-            const img = marketImgRef.current;
-            const imgX = boxX + textPadding;
-            const imgY = boxY + (boxHeight - imageSize) / 2; // Vertically center
-
-            // Draw rounded rectangle clip for image
-            ctx.save();
-            ctx.beginPath();
-            const imgRadius = 12; // Increased corner radius to match rectangle
-            ctx.moveTo(imgX + imgRadius, imgY);
-            ctx.lineTo(imgX + imageSize - imgRadius, imgY);
-            ctx.quadraticCurveTo(imgX + imageSize, imgY, imgX + imageSize, imgY + imgRadius);
-            ctx.lineTo(imgX + imageSize, imgY + imageSize - imgRadius);
-            ctx.quadraticCurveTo(imgX + imageSize, imgY + imageSize, imgX + imageSize - imgRadius, imgY + imageSize);
-            ctx.lineTo(imgX + imgRadius, imgY + imageSize);
-            ctx.quadraticCurveTo(imgX, imgY + imageSize, imgX, imgY + imageSize - imgRadius);
-            ctx.lineTo(imgX, imgY + imgRadius);
-            ctx.quadraticCurveTo(imgX, imgY, imgX + imgRadius, imgY);
-            ctx.closePath();
-            ctx.clip();
-
-            ctx.drawImage(img, imgX, imgY, imageSize, imageSize);
-            ctx.restore();
-
-            textStartX = imgX + imageSize + imageMargin;
-          }
-          
-          // Calculate max width for text (leave space for odds and banner on right)
-          const maxTextWidth = 420; // Reduced from 450 to make title area slightly narrower
-          
-          // Event title (white text) - max 2 lines with ellipsis for truncation
-          ctx.font = '600 28px system-ui, sans-serif'; // Increased from 26px to 28px
-          ctx.fillStyle = 'rgb(231, 233, 234)';
-          ctx.textAlign = 'left'; // Ensure left alignment for title
-
-          const fullText = marketData.title;
-          const fullTextWidth = ctx.measureText(fullText).width;
-          const ellipsis = '...';
-          const ellipsisWidth = ctx.measureText(ellipsis).width;
-
-          if (fullTextWidth <= maxTextWidth) {
-            // Text fits in one line - center it vertically
-            const textY = boxY + boxHeight / 2 + 8; // Vertically centered
-            ctx.fillText(fullText, textStartX, textY);
-          } else {
-            // Text needs wrapping - split into two rows max, with truncation
-            const lineHeight = 34; // Increased from 30px to 34px for more spacing
-            const totalTextHeight = lineHeight * 2; // Two lines
-            const textY = boxY + (boxHeight - totalTextHeight) / 2 + 24; // Center the two-line block
-            const words = fullText.split(' ');
-            let line1 = '';
-            let line2 = '';
-
-            for (const word of words) {
-              // Try adding to line 1
-              const testLine1 = line1 + (line1 ? ' ' : '') + word;
-              const line1Width = ctx.measureText(testLine1).width;
-
-              if (line1Width <= maxTextWidth) {
-                line1 = testLine1;
-              } else {
-                // Line 1 is full, add to line 2
-                const testLine2 = line2 + (line2 ? ' ' : '') + word;
-                const line2Width = ctx.measureText(testLine2).width;
-
-                if (line2Width <= maxTextWidth - ellipsisWidth) {
-                  line2 = testLine2;
-                } else {
-                  // Line 2 is also full - truncate with ellipsis
-                  break;
-                }
-              }
-            }
-
-            // Draw the lines (line2 may have ellipsis)
-            ctx.fillText(line1, textStartX, textY);
-            if (line2) {
-              ctx.fillText(line2, textStartX, textY + 34);
-            } else {
-              // Only one line, add ellipsis if truncated
-              const truncatedWidth = ctx.measureText(line1).width;
-              if (truncatedWidth > maxTextWidth - ellipsisWidth) {
-                // Truncate line1 and add ellipsis
-                let truncatedLine = line1;
-                while (ctx.measureText(truncatedLine + ellipsis).width > maxTextWidth) {
-                  truncatedLine = truncatedLine.slice(0, -1);
-                }
-                ctx.fillText(truncatedLine + ellipsis, textStartX, textY);
-              } else {
-                ctx.fillText(line1, textStartX, textY);
-              }
-            }
-          }
-          
-          // Draw odds (yesBid) on the right side if available
-          if (market.yesBid) {
-            const bannerReservedWidth = 240; // Space reserved for banner column
-            const oddsColumnEnd = boxX + boxWidth - textPadding - bannerReservedWidth;
-            
-            // Convert decimal to percentage (0.01 -> 1%)
-            const oddsValue = parseFloat(market.yesBid) * 100;
-            const oddsText = Math.round(oddsValue) + '%';
-            
-            // Calculate payout: (100 / percentage) * 100
-            const payoutValue = (100 / oddsValue) * 100;
-            const payoutAmount = Math.round(payoutValue);
-            
-            // Measure payout line width for centering
-            ctx.font = '400 16px system-ui, sans-serif';
-            const greenText = '$' + payoutAmount;
-            const prefix = '$100 → ';
-            const payoutLineWidth = ctx.measureText(prefix + greenText).width;
-            
-            // Draw percentage (larger, above and centered over payout)
-            ctx.font = '700 60px system-ui, sans-serif'; // Increased from 48px to 60px
-            ctx.fillStyle = 'rgb(231, 233, 234)';
-            const oddsY = boxY + boxHeight / 2 + 4; // Moved down slightly
-            // Center the percentage above the payout line
-            const percentageWidth = ctx.measureText(oddsText).width;
-            const percentageX = oddsColumnEnd - (payoutLineWidth / 2) + (percentageWidth / 2);
-            ctx.textAlign = 'right';
-            ctx.fillText(oddsText, percentageX, oddsY);
-            
-            // Draw payout with mixed colors
-            ctx.font = '400 20px system-ui, sans-serif'; // Increased from 17px to 20px
-            const payoutY = oddsY + 34; // Reduced from 38 to bring closer
-            
-            // Measure and draw the full text with green payout
-            const greenWidth = ctx.measureText(greenText).width;
-            
-            // Draw "$X" in green (right-aligned)
-            ctx.fillStyle = 'rgb(0, 186, 124)'; // Green color
-            ctx.fillText(greenText, oddsColumnEnd, payoutY);
-            
-            // Draw "$100 → " in gray (to the left of green text)
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
-            ctx.fillText(prefix, oddsColumnEnd - greenWidth, payoutY);
-            
-            ctx.textAlign = 'left'; // Reset alignment
-            
-            // Draw Sonotrade banner in its own column on the far right
-            let banner = bannerImgRef.current;
-            if (!banner) {
-              banner = new Image();
-              banner.src = '/banner.png';
-              bannerImgRef.current = banner;
-            }
-            
-            if (banner.complete && banner.width && banner.height) {
-              const bannerHeight = 55; // Increased from 50px to 55px
-              const bannerAspectRatio = banner.width / banner.height;
-              const bannerWidth = bannerHeight * bannerAspectRatio;
-              
-              // Calculate total height of banner + text + gap
-              const textGap = 7; // Reduced gap between banner and text
-              const textHeight = 16; // Approximate text height (increased for 15px font)
-              const totalHeight = bannerHeight + textGap + textHeight;
-              const rightMargin = 0; // Minimal right margin from rectangle edge
-              
-              // Position banner and text as a group, vertically centered
-              const groupY = boxY + (boxHeight - totalHeight) / 2;
-              // Position banner with right margin considered
-              const maxBannerRight = boxX + boxWidth - textPadding - rightMargin;
-              const bannerX = maxBannerRight - bannerWidth;
-              const bannerY = groupY;
-              
-              // Draw banner (removed bounds check to debug)
-              ctx.drawImage(banner, bannerX, bannerY, bannerWidth, bannerHeight);
-              
-              // Draw "Exclusive access in bio" below the banner
-              ctx.font = '400 17px system-ui, sans-serif';
-              ctx.fillStyle = 'rgba(255, 255, 255, 0.5)'; // White at 50% opacity
-              ctx.textAlign = 'center';
-              const textX = bannerX + bannerWidth / 2; // Center text under banner
-              const textY = bannerY + bannerHeight + textGap + 10;
-              ctx.fillText('Exclusive access in bio', textX, textY);
-            }
-            
-            // Reset text alignment to left (default)
-            ctx.textAlign = 'left';
-          }
-        }
+        // Draw market data box below the video (uses reusable function)
+        drawMarketCardOnContext({ ctx, boxY: y + h + 30 });
       }
     }
     draw();
@@ -1501,352 +1483,17 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
         offscreenCtx.drawImage(sourceFrame.frame, dx, dy, drawW, drawH);
         offscreenCtx.restore();
 
-        // Draw header overlay (matching main canvas)
-        const HEADER_PADDING_X = 32;
-        const HEADER_PADDING_TOP = 14;
-        const BASE_HEADER_HEIGHT = 110;
-        const CAPTION_LINE_HEIGHT = 60;
-        const CAPTION_TOP_PADDING = 80;
-
-        // Count caption lines for header height calculation
-        const countCaptionLines = (ctx: CanvasRenderingContext2D): number => {
-          if (!overlayCaption) return 0;
-          ctx.font = '400 42px Chirp, "Comic Sans MS", cursive';
-          const maxWidth = CANVAS_W - HEADER_PADDING_X * 2;
-          const userLines = overlayCaption.split('\n');
-          let totalLines = 0;
-          for (const userLine of userLines) {
-            if (!userLine) {
-              totalLines++;
-              continue;
-            }
-            const words = userLine.split(' ');
-            let line = '';
-            for (const word of words) {
-              const testLine = line + word + ' ';
-              if (ctx.measureText(testLine).width > maxWidth && line !== '') {
-                totalLines++;
-                line = word + ' ';
-              } else {
-                line = testLine;
-              }
-            }
-            if (line) totalLines++;
-          }
-          return totalLines;
-        };
-
-        const captionLines = countCaptionLines(offscreenCtx);
+        // Draw header overlay using reusable function (exact match with main canvas)
+        // First calculate header height to position it correctly
+        const captionLines = overlayCaption ? countCaptionLines(offscreenCtx) : 0;
         const headerHeight = overlayCaption
           ? BASE_HEADER_HEIGHT + CAPTION_TOP_PADDING + (captionLines * CAPTION_LINE_HEIGHT)
           : BASE_HEADER_HEIGHT;
-
         const headerY = Math.max(0, box.y - headerHeight + 16);
-        const padX = HEADER_PADDING_X;
-        const padY = HEADER_PADDING_TOP;
-        const cx = 0; // Header starts at left edge
-        const cy = headerY;
-        const cw = CANVAS_W;
+        drawHeaderOnContext({ ctx: offscreenCtx, cx: 0, cy: headerY, cw: CANVAS_W, countCaptionLinesFn: countCaptionLines });
 
-        // Header background
-        offscreenCtx.fillStyle = '#000';
-        offscreenCtx.fillRect(0, headerY, CANVAS_W, headerHeight);
-
-        // Fonts and colors
-        const nameFont = '700 44px Chirp, "Comic Sans MS", cursive';
-        const metaFont = '400 32px Chirp, "Comic Sans MS", cursive';
-        const nameColor = 'rgb(231, 233, 234)';
-        const metaColor = 'rgb(113, 118, 123)';
-        const lineH = 50;
-        const baselineName = cy + padY + lineH;
-        const handleBaseline = baselineName + 48;
-
-        // Logo on the left, vertically centered
-        const logoHeight = 96;
-        const textCenterY = (baselineName + handleBaseline) / 2;
-        const logoX = cx + padX;
-        let logo = logoImgRef.current;
-        if (!logo) {
-          logo = new Image();
-          logo.src = '/templatelogo.png';
-          logoImgRef.current = logo;
-        }
-
-        let logoWidth = logoHeight;
-        if (logo.complete && logo.width && logo.height) {
-          const logoAspectRatio = logo.width / logo.height;
-          logoWidth = logoHeight * logoAspectRatio;
-          const logoY = textCenterY - logoHeight / 2 - 10;
-          offscreenCtx.drawImage(logo, logoX, logoY, logoWidth, logoHeight);
-        }
-
-        // First line: display name + verified badge
-        let left = logoX + logoWidth + 16;
-
-        // Display name
-        offscreenCtx.font = nameFont;
-        offscreenCtx.fillStyle = nameColor;
-        offscreenCtx.fillText(overlayDisplayName, left, baselineName);
-        left += offscreenCtx.measureText(overlayDisplayName).width + 6;
-
-        // Verified badge
-        if (overlayVerified) {
-          const size = 36;
-          const badgeX = left;
-          const nameCenterY = baselineName - 22;
-          const badgeY = nameCenterY - size / 2 + 8;
-          let img = verifiedImgRef.current;
-          if (!img) {
-            img = new Image();
-            img.src = `data:image/svg+xml;utf8,${encodeURIComponent(VERIFIED_TICK_SVG)}`;
-            verifiedImgRef.current = img;
-          }
-          if (img.complete) {
-            offscreenCtx.drawImage(img, badgeX, badgeY, size, size);
-          }
-          left += size + 12;
-        }
-
-        // Second line: @handle
-        offscreenCtx.font = metaFont;
-        offscreenCtx.fillStyle = metaColor;
-        const handleLeft = logoX + logoWidth + 16;
-        offscreenCtx.fillText(overlayHandle, handleLeft, handleBaseline);
-
-        // Caption with proper newline handling
-        if (overlayCaption) {
-          const captionFont = '400 42px Chirp, "Comic Sans MS", cursive';
-          const captionColor = 'rgb(231, 233, 234)';
-          const captionBaseline = handleBaseline + CAPTION_TOP_PADDING;
-          const captionLeft = cx + padX;
-
-          offscreenCtx.font = captionFont;
-          offscreenCtx.fillStyle = captionColor;
-
-          const userLines = overlayCaption.split('\n');
-          const maxWidth = cw - padX * 2;
-          let y = captionBaseline;
-
-          for (let lineIndex = 0; lineIndex < userLines.length; lineIndex++) {
-            const userLine = userLines[lineIndex];
-            if (!userLine) {
-              y += CAPTION_LINE_HEIGHT;
-              continue;
-            }
-
-            const words = userLine.split(' ');
-            let line = '';
-
-            for (let i = 0; i < words.length; i++) {
-              const testLine = line + words[i] + ' ';
-              const metrics = offscreenCtx.measureText(testLine);
-
-              if (metrics.width > maxWidth && i > 0) {
-                offscreenCtx.fillText(line, captionLeft, y);
-                line = words[i] + ' ';
-                y += CAPTION_LINE_HEIGHT;
-              } else {
-                line = testLine;
-              }
-            }
-            offscreenCtx.fillText(line, captionLeft, y);
-            y += CAPTION_LINE_HEIGHT;
-          }
-        }
-
-        // Market card (full rendering like main canvas)
-        if (tag?.trim() && marketData && marketData.markets && marketData.markets.length > 0) {
-          const market = marketData.markets[0];
-          const boxY = box.y + box.h + 30;
-          const boxHeight = 140;
-          const boxPadding = 60;
-          const radius = 16;
-          const boxX = boxPadding;
-          const boxWidth = CANVAS_W - boxPadding * 2;
-
-          // Rounded rectangle background
-          offscreenCtx.fillStyle = '#000';
-          offscreenCtx.strokeStyle = 'rgba(113, 118, 123, 0.5)';
-          offscreenCtx.lineWidth = 2;
-
-          offscreenCtx.beginPath();
-          offscreenCtx.moveTo(boxX + radius, boxY);
-          offscreenCtx.lineTo(boxX + boxWidth - radius, boxY);
-          offscreenCtx.quadraticCurveTo(boxX + boxWidth, boxY, boxX + boxWidth, boxY + radius);
-          offscreenCtx.lineTo(boxX + boxWidth, boxY + boxHeight - radius);
-          offscreenCtx.quadraticCurveTo(boxX + boxWidth, boxY + boxHeight, boxX + boxWidth - radius, boxY + boxHeight);
-          offscreenCtx.lineTo(boxX + radius, boxY + boxHeight);
-          offscreenCtx.quadraticCurveTo(boxX, boxY + boxHeight, boxX, boxY + boxHeight - radius);
-          offscreenCtx.lineTo(boxX, boxY + radius);
-          offscreenCtx.quadraticCurveTo(boxX, boxY, boxX + radius, boxY);
-          offscreenCtx.closePath();
-          offscreenCtx.fill();
-          offscreenCtx.stroke();
-
-          const textPadding = 40;
-          const imageSize = 80;
-          const imageMargin = 25;
-
-          let textStartX = boxX + textPadding;
-
-          // Market image with rounded corners
-          if (marketImgRef.current && marketImgLoadedRef.current) {
-            const img = marketImgRef.current;
-            const imgX = boxX + textPadding;
-            const imgY = boxY + (boxHeight - imageSize) / 2;
-
-            offscreenCtx.save();
-            offscreenCtx.beginPath();
-            const imgRadius = 12;
-            offscreenCtx.moveTo(imgX + imgRadius, imgY);
-            offscreenCtx.lineTo(imgX + imageSize - imgRadius, imgY);
-            offscreenCtx.quadraticCurveTo(imgX + imageSize, imgY, imgX + imageSize, imgY + imgRadius);
-            offscreenCtx.lineTo(imgX + imageSize, imgY + imageSize - imgRadius);
-            offscreenCtx.quadraticCurveTo(imgX + imageSize, imgY + imageSize, imgX + imageSize - imgRadius, imgY + imageSize);
-            offscreenCtx.lineTo(imgX + imgRadius, imgY + imageSize);
-            offscreenCtx.quadraticCurveTo(imgX, imgY + imageSize, imgX, imgY + imageSize - imgRadius);
-            offscreenCtx.lineTo(imgX, imgY + imgRadius);
-            offscreenCtx.quadraticCurveTo(imgX, imgY, imgX + imgRadius, imgY);
-            offscreenCtx.closePath();
-            offscreenCtx.clip();
-
-            offscreenCtx.drawImage(img, imgX, imgY, imageSize, imageSize);
-            offscreenCtx.restore();
-
-            textStartX = imgX + imageSize + imageMargin;
-          }
-
-          // Title with 2-line wrapping
-          const maxTextWidth = 420;
-          offscreenCtx.font = '600 28px system-ui, sans-serif';
-          offscreenCtx.fillStyle = 'rgb(231, 233, 234)';
-          offscreenCtx.textAlign = 'left';
-
-          const fullText = marketData.title;
-          const fullTextWidth = offscreenCtx.measureText(fullText).width;
-          const ellipsis = '...';
-          const ellipsisWidth = offscreenCtx.measureText(ellipsis).width;
-
-          if (fullTextWidth <= maxTextWidth) {
-            const textY = boxY + boxHeight / 2 + 8;
-            offscreenCtx.fillText(fullText, textStartX, textY);
-          } else {
-            const lineHeight = 34;
-            const totalTextHeight = lineHeight * 2;
-            const textY = boxY + (boxHeight - totalTextHeight) / 2 + 24;
-            const words = fullText.split(' ');
-            let line1 = '';
-            let line2 = '';
-
-            for (const word of words) {
-              const testLine1 = line1 + (line1 ? ' ' : '') + word;
-              const line1Width = offscreenCtx.measureText(testLine1).width;
-
-              if (line1Width <= maxTextWidth) {
-                line1 = testLine1;
-              } else {
-                const testLine2 = line2 + (line2 ? ' ' : '') + word;
-                const line2Width = offscreenCtx.measureText(testLine2).width;
-
-                if (line2Width <= maxTextWidth - ellipsisWidth) {
-                  line2 = testLine2;
-                } else {
-                  break;
-                }
-              }
-            }
-
-            offscreenCtx.fillText(line1, textStartX, textY);
-            if (line2) {
-              offscreenCtx.fillText(line2, textStartX, textY + 34);
-            } else {
-              const truncatedWidth = offscreenCtx.measureText(line1).width;
-              if (truncatedWidth > maxTextWidth - ellipsisWidth) {
-                let truncatedLine = line1;
-                while (offscreenCtx.measureText(truncatedLine + ellipsis).width > maxTextWidth) {
-                  truncatedLine = truncatedLine.slice(0, -1);
-                }
-                offscreenCtx.fillText(truncatedLine + ellipsis, textStartX, textY);
-              } else {
-                offscreenCtx.fillText(line1, textStartX, textY);
-              }
-            }
-          }
-
-          // Odds (percentage + payout) and banner
-          if (market.yesBid) {
-            const bannerReservedWidth = 240;
-            const oddsColumnEnd = boxX + boxWidth - textPadding - bannerReservedWidth;
-
-            const oddsValue = parseFloat(market.yesBid) * 100;
-            const oddsText = Math.round(oddsValue) + '%';
-            const payoutValue = (100 / oddsValue) * 100;
-            const payoutAmount = Math.round(payoutValue);
-
-            offscreenCtx.font = '400 16px system-ui, sans-serif';
-            const greenText = '$' + payoutAmount;
-            const prefix = '$100 → ';
-            const payoutLineWidth = offscreenCtx.measureText(prefix + greenText).width;
-
-            // Percentage
-            offscreenCtx.font = '700 60px system-ui, sans-serif';
-            offscreenCtx.fillStyle = 'rgb(231, 233, 234)';
-            const oddsY = boxY + boxHeight / 2 + 4;
-            const percentageWidth = offscreenCtx.measureText(oddsText).width;
-            const percentageX = oddsColumnEnd - (payoutLineWidth / 2) + (percentageWidth / 2);
-            offscreenCtx.textAlign = 'right';
-            offscreenCtx.fillText(oddsText, percentageX, oddsY);
-
-            // Payout with mixed colors
-            offscreenCtx.font = '400 20px system-ui, sans-serif';
-            const payoutY = oddsY + 34;
-
-            const greenWidth = offscreenCtx.measureText(greenText).width;
-
-            offscreenCtx.fillStyle = 'rgb(0, 186, 124)';
-            offscreenCtx.fillText(greenText, oddsColumnEnd, payoutY);
-
-            offscreenCtx.fillStyle = 'rgba(255, 255, 255, 0.5)';
-            offscreenCtx.fillText(prefix, oddsColumnEnd - greenWidth, payoutY);
-
-            offscreenCtx.textAlign = 'left';
-
-            // Sonotrade banner
-            let banner = bannerImgRef.current;
-            if (!banner) {
-              banner = new Image();
-              banner.src = '/banner.png';
-              bannerImgRef.current = banner;
-            }
-
-            if (banner.complete && banner.width && banner.height) {
-              const bannerHeight = 55;
-              const bannerAspectRatio = banner.width / banner.height;
-              const bannerWidth = bannerHeight * bannerAspectRatio;
-
-              const textGap = 7;
-              const textHeight = 16;
-              const totalHeight = bannerHeight + textGap + textHeight;
-              const rightMargin = 0;
-
-              const groupY = boxY + (boxHeight - totalHeight) / 2;
-              const maxBannerRight = boxX + boxWidth - textPadding - rightMargin;
-              const bannerX = maxBannerRight - bannerWidth;
-              const bannerY = groupY;
-
-              offscreenCtx.drawImage(banner, bannerX, bannerY, bannerWidth, bannerHeight);
-
-              offscreenCtx.font = '400 17px system-ui, sans-serif';
-              offscreenCtx.fillStyle = 'rgba(255, 255, 255, 0.5)';
-              offscreenCtx.textAlign = 'center';
-              const textX = bannerX + bannerWidth / 2;
-              const textY = bannerY + bannerHeight + textGap + 10;
-              offscreenCtx.fillText('Exclusive access in bio', textX, textY);
-            }
-
-            offscreenCtx.textAlign = 'left';
-          }
-        }
+        // Draw market card using reusable function (exact match with main canvas)
+        drawMarketCardOnContext({ ctx: offscreenCtx, boxY: box.y + box.h + 30 });
 
         // Create VideoSample from offscreen canvas
         const sample = new VideoSample(offscreenCanvas, {
