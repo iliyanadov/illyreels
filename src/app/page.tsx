@@ -133,6 +133,9 @@ export default function Home() {
   // Store refs for each canvas to trigger downloads
   const canvasRefsMap = useRef<Map<string, TikTokCanvasRef>>(new Map());
 
+  // Brand toggle: 'sonotrade' | 'forum'
+  const [brandMode, setBrandMode] = useState<'sonotrade' | 'forum'>('sonotrade');
+
   // Google Sheets state
   const [googleToken, setGoogleToken] = useState<{ accessToken: string; refreshToken?: string } | null>(null);
   const [showSheetsModal, setShowSheetsModal] = useState(false);
@@ -474,6 +477,34 @@ export default function Home() {
           >
             Reset All
           </button>
+          <div className="w-px h-6 bg-zinc-800 mx-1"></div>
+          {/* Brand toggle */}
+          <div className="flex items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-800 p-1">
+            <button
+              onClick={() => setBrandMode('sonotrade')}
+              className={`rounded-md px-3 py-1 text-xs font-semibold transition-colors ${
+                brandMode === 'sonotrade'
+                  ? 'bg-zinc-600 text-white'
+                  : 'text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              Sonotrade
+            </button>
+            <button
+              onClick={() => setBrandMode('forum')}
+              className={`flex items-center gap-1.5 rounded-md px-3 py-1 text-xs font-semibold transition-colors ${
+                brandMode === 'forum'
+                  ? 'bg-[#0078FF] text-white'
+                  : 'text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              {brandMode === 'forum' && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src="/logoForum.png" alt="" className="h-4 w-4 rounded-full object-cover" />
+              )}
+              Forum Market
+            </button>
+          </div>
         </div>
       </div>
 
@@ -650,6 +681,9 @@ export default function Home() {
                     videoId={entry.data!.id}
                     rowNumber={rowIndex}
                     onVideoError={() => handleVideoError(entry.id)}
+                    overlayLogoSrc={brandMode === 'forum' ? '/logoForum.png' : '/templatelogo.png'}
+                    overlayDisplayName={brandMode === 'forum' ? 'Forum Market' : 'Sonotrade'}
+                    overlayHandle={brandMode === 'forum' ? '@ForumDotMarket' : '@SonotradeHQ'}
                     overlayCaption={entry.caption}
                     tag={entry.tag}
                     marketData={entry.marketData}

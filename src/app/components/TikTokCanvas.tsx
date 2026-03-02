@@ -87,6 +87,7 @@ interface Props {
   videoId?: string;
   rowNumber?: number; // Row number for ordered exports
   onVideoError?: () => void; // Callback when video fails to load
+  overlayLogoSrc?: string;
   overlayDisplayName?: string;
   overlayHandle?: string;
   overlayDate?: string;
@@ -105,6 +106,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
   videoId,
   rowNumber = 0,
   onVideoError,
+  overlayLogoSrc = '/templatelogo.png',
   overlayDisplayName = 'Sonotrade',
   overlayHandle = '@SonotradeHQ',
   overlayDate = 'Jan 22',
@@ -204,6 +206,11 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
       video.removeEventListener('loadedmetadata', handleLoadedMetadata);
     };
   }, [videoSrc]);
+
+  // Reset logo cache when logo source changes so next draw picks up the new image
+  useEffect(() => {
+    logoImgRef.current = null;
+  }, [overlayLogoSrc]);
 
   // Clear video error when videoSrc changes and set up loading state
   useEffect(() => {
@@ -380,7 +387,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     let logo = logoImgRef.current;
     if (!logo) {
       logo = new Image();
-      logo.src = '/templatelogo.png';
+      logo.src = overlayLogoSrc;
       logoImgRef.current = logo;
     }
 
@@ -390,11 +397,18 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
       const logoAspectRatio = logo.width / logo.height;
       logoWidth = logoHeight * logoAspectRatio;
       const logoY = textCenterY - logoHeight / 2 - 10; // Move up by 10px
+      const logoRadius = 14; // corner radius
+      ctx.save();
+      ctx.beginPath();
+      ctx.roundRect(logoX, logoY, logoWidth, logoHeight, logoRadius);
+      ctx.closePath();
+      ctx.clip();
       ctx.drawImage(logo, logoX, logoY, logoWidth, logoHeight);
+      ctx.restore();
     }
 
     // First line: display name + verified badge, to the right of the logo
-    let left = logoX + logoWidth + 16;
+    let left = logoX + logoWidth + 28; // extra right-side gap after logo
 
     // Display name
     ctx.font = nameFont;
@@ -423,7 +437,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     // Second line: @handle under the display name, with a bit more spacing
     ctx.font = metaFont;
     ctx.fillStyle = metaColor;
-    const handleLeft = logoX + logoWidth + 16;
+    const handleLeft = logoX + logoWidth + 28;
     ctx.fillText(overlayHandle, handleLeft, handleBaseline);
 
     // Caption: below the handle if provided
