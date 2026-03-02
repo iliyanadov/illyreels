@@ -19,6 +19,22 @@ type Handle = 'tl' | 'tc' | 'tr' | 'bl' | 'bc' | 'br' | 'move';
 
 interface Box { x: number; y: number; w: number; h: number }
 
+// Pure module-level function — no closure issues inside effects
+function calcVideoBox(vw: number, vh: number, currentBrand: string): Box {
+  const headerNet = BASE_HEADER_HEIGHT - 4; // 106px — header height minus its 4px overlap
+  const maxVideoH = currentBrand === 'forum'
+    ? CANVAS_H - headerNet - 30 - 90  // reserve space for gap + ribbon
+    : CANVAS_H;
+  const scale = Math.min(VIDEO_TARGET_W / vw, maxVideoH / vh);
+  const drawW = vw * scale;
+  const drawH = vh * scale;
+  const x = (CANVAS_W - drawW) / 2;
+  const y = currentBrand === 'forum'
+    ? headerNet + (maxVideoH - drawH) / 2
+    : (CANVAS_H - drawH) / 2;
+  return { x, y, w: drawW, h: drawH };
+}
+
 const CURSORS: Record<Handle, string> = {
   tl: 'n-resize', tc: 'n-resize',  tr: 'n-resize',
   bl: 's-resize', bc: 's-resize',  br: 's-resize',
@@ -87,7 +103,9 @@ interface Props {
   videoId?: string;
   rowNumber?: number; // Row number for ordered exports
   onVideoError?: () => void; // Callback when video fails to load
+  brand?: 'sonotrade' | 'forum';
   overlayLogoSrc?: string;
+  overlayChange?: string;
   overlayDisplayName?: string;
   overlayHandle?: string;
   overlayDate?: string;
@@ -106,7 +124,9 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
   videoId,
   rowNumber = 0,
   onVideoError,
+  brand = 'sonotrade',
   overlayLogoSrc = '/templatelogo.png',
+  overlayChange = '',
   overlayDisplayName = 'Sonotrade',
   overlayHandle = '@SonotradeHQ',
   overlayDate = 'Jan 22',
@@ -183,16 +203,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
       const vh = video.videoHeight;
       console.log('[Row ' + (rowNumber + 1) + '] Video loaded successfully:', { videoId, vw, vh, src: videoSrc });
       if (vw && vh) {
-        // Calculate scale to fit video to VIDEO_TARGET_W width
-        const scale = Math.min(VIDEO_TARGET_W / vw, CANVAS_H / vh);
-        const drawW = vw * scale;
-        const drawH = vh * scale;
-
-        // Center the crop box on the canvas
-        const x = (CANVAS_W - drawW) / 2;
-        const y = (CANVAS_H - drawH) / 2;
-
-        const b = { x, y, w: drawW, h: drawH };
+        const b = calcVideoBox(vw, vh, brand);
         boxRef.current = b;
         setBox(b);
         videoOffsetRef.current = { x: 0, y: 0 };
@@ -205,7 +216,19 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     return () => {
       video.removeEventListener('loadedmetadata', handleLoadedMetadata);
     };
-  }, [videoSrc]);
+  }, [videoSrc, brand]);
+
+  // Reposition already-loaded video when brand changes
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !video.videoWidth || !video.videoHeight) return;
+    const b = calcVideoBox(video.videoWidth, video.videoHeight, brand);
+    boxRef.current = b;
+    setBox(b);
+    videoOffsetRef.current = { x: 0, y: 0 };
+    videoScaleRef.current = 1;
+    setVideoScale(1);
+  }, [brand]);
 
   // Reset logo cache when logo source changes so next draw picks up the new image
   useEffect(() => {
@@ -716,6 +739,85 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     }
   }
 
+  function drawForumBannerOnContext({ ctx, boxY }: { ctx: CanvasRenderingContext2D; boxY: number }): void {
+    const boxHeight = 90;
+    const boxX = 0;
+    const boxWidth = CANVAS_W;
+
+    // Blue background, no border, no corner radius
+    ctx.fillStyle = '#246eff';
+    ctx.fillRect(boxX, boxY, boxWidth, boxHeight);
+
+    // Logo on the left, vertically centered
+    let logo = logoImgRef.current;
+    if (!logo) {
+      logo = new Image();
+      logo.src = overlayLogoSrc;
+      logoImgRef.current = logo;
+    }
+    if (logo.complete && logo.width && logo.height) {
+      const logoH = 60;
+      const logoW = logoH * (logo.width / logo.height);
+      const logoX = 60;
+      const logoY = boxY + (boxHeight - logoH) / 2;
+      ctx.drawImage(logo, logoX, logoY, logoW, logoH);
+
+      // "Forum" text to the right of the logo
+      ctx.font = 'bold 46px "Arial MT Pro", "Arial Black", Arial, sans-serif';
+      ctx.fillStyle = '#ffffff';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('Forum', logoX + logoW + 10, boxY + boxHeight / 2 + 3);
+
+      // Right side: [event ID] [▲] [% change], all right-aligned as a group
+      const tagText = tag?.trim() || '';
+      const changeText = overlayChange?.trim() || '';
+      if (tagText || changeText) {
+        ctx.font = '300 34px "Arial MT Pro", Arial, sans-serif';
+        const triW = 22;
+        const triH = 19;
+        const triGap = 14;
+        const centerY = boxY + boxHeight / 2 + 3;
+        const rightEdge = CANVAS_W - 90;
+
+        // Measure text widths
+        const changeWidth = changeText ? ctx.measureText(changeText).width : 0;
+        const tagWidth = tagText ? ctx.measureText(tagText).width : 0;
+
+        // Calculate group width: tag + gap + triangle + gap + change
+        const groupWidth = tagWidth + (tagWidth ? triGap : 0) + triW + (changeText ? triGap : 0) + changeWidth;
+        let x = rightEdge - groupWidth;
+
+        // Draw event ID
+        if (tagText) {
+          ctx.fillStyle = '#ffffff';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(tagText, x, centerY);
+          x += tagWidth + triGap;
+        }
+
+        // Draw triangle
+        const triY = centerY - triH / 2 - 4;
+        ctx.fillStyle = '#00c853';
+        ctx.beginPath();
+        ctx.moveTo(x + triW / 2, triY);
+        ctx.lineTo(x + triW, triY + triH);
+        ctx.lineTo(x, triY + triH);
+        ctx.closePath();
+        ctx.fill();
+        x += triW + (changeText ? triGap : 0);
+
+        // Draw % change
+        if (changeText) {
+          ctx.fillStyle = '#00c853';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(changeText, x, centerY);
+        }
+
+        ctx.textBaseline = 'alphabetic';
+      }
+    }
+  }
+
   // ── Draw loop (black bg + global header + cropped video) ─────────────────────
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -762,13 +864,17 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
         ctx.drawImage(video, dx, dy, drawW, drawH);
         ctx.restore();
 
-        // Draw market data box below the video (uses reusable function)
-        drawMarketCardOnContext({ ctx, boxY: y + h + 30 });
+        // Draw brand element below the video
+        if (brand === 'forum') {
+          drawForumBannerOnContext({ ctx, boxY: y + h + 30 });
+        } else {
+          drawMarketCardOnContext({ ctx, boxY: y + h + 30 });
+        }
       }
     }
     draw();
     return () => { active = false; cancelAnimationFrame(raf.current); };
-  }, [videoSrc, overlayDisplayName, overlayHandle, overlayDate, overlayVerified, overlayCaption, videoScale, marketData]);
+  }, [videoSrc, overlayDisplayName, overlayHandle, overlayDate, overlayVerified, overlayCaption, videoScale, marketData, brand, overlayChange]);
 
   // ── Pinch-to-zoom (wheel/trackpad + touch gestures) ──────────────────────────
   useEffect(() => {
@@ -1669,9 +1775,14 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
         // @ts-ignore - OffscreenCanvasRenderingContext2D is compatible for our use
         drawHeaderOnContext({ ctx: offscreenCtx, cx: 0, cy: headerY, cw: CANVAS_W, countCaptionLinesFn: countCaptionLines });
 
-        // Draw market card using reusable function (exact match with main canvas)
-        // @ts-ignore - OffscreenCanvasRenderingContext2D is compatible for our use
-        drawMarketCardOnContext({ ctx: offscreenCtx, boxY: box.y + box.h + 30 });
+        // Draw brand element below video (exact match with main canvas)
+        if (brand === 'forum') {
+          // @ts-ignore - OffscreenCanvasRenderingContext2D is compatible for our use
+          drawForumBannerOnContext({ ctx: offscreenCtx, boxY: box.y + box.h + 30 });
+        } else {
+          // @ts-ignore - OffscreenCanvasRenderingContext2D is compatible for our use
+          drawMarketCardOnContext({ ctx: offscreenCtx, boxY: box.y + box.h + 30 });
+        }
 
         // Create VideoSample from offscreen canvas
         const sample = new VideoSample(offscreenCanvas, {

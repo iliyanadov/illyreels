@@ -91,6 +91,7 @@ interface VideoEntry {
   url: string;
   caption: string;
   tag: string;
+  change: string;
   data: VideoData | null;
   marketData: EventData | null;
   loading: boolean;
@@ -127,7 +128,7 @@ const TAG_TO_EVENT_ID: Record<string, string> = {
 
 export default function Home() {
   const [entries, setEntries] = useState<VideoEntry[]>([
-    { id: '1', url: '', caption: '', tag: '', data: null, marketData: null, loading: false, loadingMarket: false, error: '', marketError: '', videoFailed: false }
+    { id: '1', url: '', caption: '', tag: '', change: '', data: null, marketData: null, loading: false, loadingMarket: false, error: '', marketError: '', videoFailed: false }
   ]);
 
   // Store refs for each canvas to trigger downloads
@@ -160,6 +161,7 @@ export default function Home() {
       url: '',
       caption: '',
       tag: '',
+      change: '',
       data: null,
       marketData: null,
       loading: false,
@@ -177,7 +179,7 @@ export default function Home() {
 
   function resetEverything() {
     setEntries([
-      { id: '1', url: '', caption: '', tag: '', data: null, marketData: null, loading: false, loadingMarket: false, error: '', marketError: '', videoFailed: false }
+      { id: '1', url: '', caption: '', tag: '', change: '', data: null, marketData: null, loading: false, loadingMarket: false, error: '', marketError: '', videoFailed: false }
     ]);
   }
 
@@ -187,7 +189,7 @@ export default function Home() {
     ));
   }
 
-  function updateEntry(id: string, field: 'url' | 'caption' | 'tag', value: string) {
+  function updateEntry(id: string, field: 'url' | 'caption' | 'tag' | 'change', value: string) {
     setEntries(prevEntries => prevEntries.map(e => e.id === id ? { ...e, [field]: value } : e));
   }
 
@@ -256,9 +258,9 @@ export default function Home() {
       return;
     }
 
-    // Set loading state for both video and market
+    // Set loading state for both video and market (skip market in forum mode)
     setEntries(prev => prev.map(e =>
-      e.id === id ? { ...e, loading: true, loadingMarket: !!e.tag.trim(), error: '', data: null, marketData: null, marketError: '', videoFailed: false } : e
+      e.id === id ? { ...e, loading: true, loadingMarket: brandMode !== 'forum' && !!e.tag.trim(), error: '', data: null, marketData: null, marketError: '', videoFailed: false } : e
     ));
 
     try {
@@ -287,9 +289,9 @@ export default function Home() {
       return;
     }
 
-    // Fetch market data if tag is present
+    // Fetch market data if tag is present (skip in forum mode)
     const entry = entries.find(e => e.id === id);
-    if (entry?.tag.trim()) {
+    if (brandMode !== 'forum' && entry?.tag.trim()) {
       const tag = entry.tag.trim().toLowerCase();
       const eventId = TAG_TO_EVENT_ID[tag];
 
@@ -404,6 +406,7 @@ export default function Home() {
         url: row.url,
         caption: row.caption,
         tag: row.tag || '',
+        change: row.change || '',
         data: null,
         marketData: null,
         loading: false,
@@ -544,6 +547,11 @@ export default function Home() {
                   <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-400 uppercase tracking-wider">
                     Event ID
                   </th>
+                  {brandMode === 'forum' && (
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-400 uppercase tracking-wider w-32">
+                      % Change
+                    </th>
+                  )}
                   <th className="px-4 py-3 text-center text-xs font-semibold text-zinc-400 uppercase tracking-wider w-32">
                     Actions
                   </th>
@@ -605,6 +613,22 @@ export default function Home() {
                         <p className="mt-1 text-xs text-green-400">✓ {entry.marketData.title}</p>
                       )}
                     </td>
+                    {brandMode === 'forum' && (
+                      <td className="px-4 py-3">
+                        <input
+                          type="text"
+                          value={entry.change}
+                          onChange={e => updateEntry(entry.id, 'change', e.target.value)}
+                          onKeyDown={e => {
+                            if ((e.metaKey || e.ctrlKey) && e.key === 'z') {
+                              e.preventDefault();
+                            }
+                          }}
+                          placeholder="e.g. +5.2%"
+                          className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white placeholder-zinc-500 outline-none focus:border-[#246eff] transition-colors"
+                        />
+                      </td>
+                    )}
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-center gap-2">
                         <button
@@ -681,9 +705,11 @@ export default function Home() {
                     videoId={entry.data!.id}
                     rowNumber={rowIndex}
                     onVideoError={() => handleVideoError(entry.id)}
+                    brand={brandMode}
                     overlayLogoSrc={brandMode === 'forum' ? '/logoForum.png' : '/templatelogo.png'}
                     overlayDisplayName={brandMode === 'forum' ? 'Forum Market' : 'Sonotrade'}
                     overlayHandle={brandMode === 'forum' ? '@ForumDotMarket' : '@SonotradeHQ'}
+                    overlayChange={entry.change}
                     overlayCaption={entry.caption}
                     tag={entry.tag}
                     marketData={entry.marketData}
