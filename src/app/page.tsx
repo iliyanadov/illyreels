@@ -543,8 +543,13 @@ export default function Home() {
     try {
       // Upload to Vercel Blob (direct from browser, bypasses Vercel serverless limits)
       setUploadProgress(20);
-      
-      const uploadedBlob = await upload(filename, blob, {
+
+      // Add random suffix to filename to avoid "blob already exists" errors
+      const nameWithoutExt = filename.replace(/\.[^/.]+$/, '');
+      const ext = filename.substring(filename.lastIndexOf('.'));
+      const uniqueFilename = `${nameWithoutExt}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`;
+
+      const uploadedBlob = await upload(uniqueFilename, blob, {
         access: 'public',
         handleUploadUrl: '/api/upload',
       });
