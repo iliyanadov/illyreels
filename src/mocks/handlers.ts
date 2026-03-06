@@ -97,8 +97,8 @@ export const tikwmHandlers = [
 
 // Instagram Graph API handlers
 export const instagramHandlers = [
-  // User info - use wildcard for version
-  http.get('https://graph.instagram.com/*/me', ({ request }) => {
+  // User info - unversioned endpoint (e.g., /me)
+  http.get('https://graph.instagram.com/me', ({ request }) => {
     const url = new URL(request.url);
     const token = url.searchParams.get('access_token');
 
@@ -142,9 +142,10 @@ export const instagramHandlers = [
   }),
 
   // Create media container
-  http.post('https://graph.instagram.com/*//*/media', async ({ request }) => {
+  http.post('https://graph.instagram.com/*/*/media', async ({ request }) => {
     const url = new URL(request.url);
     const token = url.searchParams.get('access_token');
+    const videoUrl = url.searchParams.get('video_url');
 
     if (!token || token === 'invalid') {
       return HttpResponse.json(
@@ -152,15 +153,6 @@ export const instagramHandlers = [
         { status: 401 }
       );
     }
-
-    const body = await request.json() as any;
-    if (!body) {
-      return HttpResponse.json(
-        { error: 'Invalid request body' },
-        { status: 400 }
-      );
-    }
-    const videoUrl = body.video_url;
 
     // Simulate error for non-public URLs
     if (!videoUrl || videoUrl.includes('private')) {
@@ -184,7 +176,7 @@ export const instagramHandlers = [
   }),
 
   // Check container status
-  http.get('https://graph.instagram.com/*/', ({ request }) => {
+  http.get('https://graph.instagram.com/v*/*', ({ request }) => {
     const url = new URL(request.url);
     const token = url.searchParams.get('access_token');
     const fields = url.searchParams.get('fields');
@@ -235,6 +227,7 @@ export const instagramHandlers = [
   http.post('https://graph.instagram.com/*/*/media_publish', async ({ request }) => {
     const url = new URL(request.url);
     const token = url.searchParams.get('access_token');
+    const creationId = url.searchParams.get('creation_id');
 
     if (!token || token === 'invalid') {
       return HttpResponse.json(
@@ -242,15 +235,6 @@ export const instagramHandlers = [
         { status: 401 }
       );
     }
-
-    const body = await request.json() as any;
-    if (!body) {
-      return HttpResponse.json(
-        { error: 'Invalid request body' },
-        { status: 400 }
-      );
-    }
-    const creationId = body.creation_id;
 
     // Simulate error for expired container
     if (creationId === 'expired-container') {

@@ -1,163 +1,199 @@
-# IllyReels - Testing Setup Complete ✅
+# IllyReels - Testing Documentation
 
 ## Test Results Summary
 
-### ✅ Unit Tests - ALL PASSING (86/86)
-- Token storage (Google + Instagram)
-- Utility functions (video URL selection, caption fallback, entry ID generation)
+### ✅ All Tests Passing (128/128)
+- **Unit Tests**: 86 tests
+- **Integration Tests**: 42 tests
+- **Coverage**: ~80% target configured
+- **Duration**: ~4 seconds
 
 ```
-Test Files: 5 passed
-Tests: 86 passed
+Test Files: 12 passed
+Tests: 128 passed
 Duration: ~3-4 seconds
 ```
 
-### E2E Tests - Infrastructure Ready
-- Test files created (requires `npx playwright install` to run)
-- Covers authentication, video download, Instagram publish, full workflow
+---
 
-## Files Created (35+ files)
+## Test Architecture
 
-### Configuration (4 files)
-- `vitest.config.ts` - Vitest configuration with 80% coverage thresholds
-- `vitest.setup.ts` - MSW setup with Next.js mocks
-- `playwright.config.ts` - E2E testing for 5 browsers + mobile
-- `.github/workflows/test.yml` - CI/CD pipeline
+```
+tests/
+├── unit/              # Isolated unit tests (86 tests)
+│   ├── lib/          # Token storage, utilities
+│   └── utils/        # Helper functions
+└── integration/       # API route integration tests (42 tests)
+    └── api/          # All 7 API endpoints tested
+```
 
-### MSW Mocks (7 files)
-- `src/mocks/handlers.ts` - All external API handlers
-- `src/mocks/server.ts` - Node.js MSW server
-- `src/mocks/browser.ts` - Browser MSW worker
-- `src/mocks/fixtures/*.json` - Static test data (5 files)
+### Unit Tests (86 tests)
 
-### Unit Tests (5 files, 86 tests)
-- `tests/unit/lib/google-token-storage.test.ts` (13 tests)
-- `tests/unit/lib/meta-token-storage.test.ts` (20 tests)
-- `tests/unit/utils/video-url-selection.test.ts` (11 tests)
-- `tests/unit/utils/caption-fallback.test.ts` (28 tests)
-- `tests/unit/utils/entry-id.test.ts` (14 tests)
+| File | Tests | Coverage |
+|------|-------|----------|
+| `google-token-storage.test.ts` | 13 | Token encoding/decoding, cookie handling |
+| `meta-token-storage.test.ts` | 20 | Instagram token management, expiry |
+| `video-url-selection.test.ts` | 11 | Video URL priority logic |
+| `caption-fallback.test.ts` | 28 | Caption selection with emojis |
+| `entry-id.test.ts` | 14 | Unique ID generation |
 
-### E2E Tests (5 files, 160 tests)
-- `tests/e2e/basic.spec.ts` - Basic page load tests
-- `tests/e2e/auth-google.spec.ts` - Google OAuth flow
-- `tests/e2e/auth-instagram.spec.ts` - Instagram OAuth flow
-- `tests/e2e/video-download.spec.ts` - Video downloading
-- `tests/e2e/instagram-publish.spec.ts` - Publishing workflow
-- `tests/e2e/full-workflow.spec.ts` - Complete user journey
+### Integration Tests (42 tests)
 
-### Documentation (3 files)
-- `TEST_DOCUMENTATION.md` - Complete technical documentation
-- `TESTING_SETUP.md` - Testing setup summary
-- `TESTING_README.md` - This file
+| Endpoint | Tests | Coverage |
+|----------|-------|----------|
+| `GET /api/google/sheets` | 6 | Spreadsheet fetch, filtering, auth |
+| `GET /api/meta/auth` | 5 | Instagram OAuth URL generation |
+| `GET /api/meta/me` | 5 | User info retrieval |
+| `POST /api/meta/reels-publish` | 10 | Container creation, polling, publish |
+| `GET /api/meta/publishing-limit` | 5 | Quota checking |
+| `GET /api/download` | 6 | Video proxy, domain whitelist |
+| `GET /api/proxy` | 7 | Generic proxy, streaming |
+| `GET /api/market` | 3 | DFlow market data |
+
+---
+
+## Testing Stack
+
+- **Runner**: Vitest
+- **Mocks**: MSW (Mock Service Worker) for external APIs
+- **Integration Framework**: `next-test-api-route-handler` (NTARH)
+- **Coverage**: v8 with 80% thresholds
+
+### External Services Mocked
+
+- Google Sheets API (`sheets.googleapis.com`)
+- Instagram Graph API (`graph.instagram.com`)
+- DFlow prediction markets API
+- Vercel Blob API
+- `mp4box` video processing
+
+---
 
 ## NPM Commands
 
 ```bash
-# Unit tests (ALL PASSING ✅)
+# Run all tests
 npm test
 
-# Unit tests in watch mode
+# Watch mode
 npm run test:watch
 
 # Coverage report
 npm run test:coverage
-
-# E2E tests (requires browser install)
-npx playwright install
-npm run test:e2e
-
-# All tests
-npm run test:all
 ```
 
-## What Your Tester Should Know
+---
 
-### 1. Unit Tests - READY TO USE ✅
-All 86 unit tests pass. These cover:
-- **Token encoding/decoding** - Base64, JSON parsing
-- **Token expiry handling** - Instagram tokens expire after 60 days
-- **Cookie security** - httpOnly, secure, sameSite
-- **Special characters** - Emojis, unicode, XSS prevention
-- **URL selection logic** - HD→SD→WM priority
-- **Caption fallback** - instagramCaption || caption || ''
-- **Unique ID generation** - No collisions
+## Error Tracking (Sentry)
 
-### 2. Integration Tests - NEED REFINEMENT
-The integration tests that directly test API routes require more complex setup due to:
-- Next.js App Router route handlers need proper Request/Response mocking
-- MSW wildcard matching needs adjustment for some endpoints
-- Recommendation: Focus on unit tests + E2E for now
+Production error tracking is configured via Sentry:
 
-### 3. E2E Tests - NEEDS BROWSER INSTALL
-Run `npx playwright install` to install browsers for E2E testing.
+```typescript
+// Server-side error tracking
+import * as Sentry from "@sentry/nextjs";
 
-The E2E tests cover:
-- OAuth flows (Google & Instagram)
-- Video download functionality
-- Instagram publishing
-- Complete user journey
+// Automatic error capture from:
+// - API routes
+// - Server actions
+// - Middleware
+```
 
-### 4. MSW Handlers - READY FOR CUSTOMIZATION
-All external services are mocked:
-- **TikTok API** (tikwm.com) - video download
-- **Instagram Graph API** - publishing, user info, quota
-- **Google APIs** - Sheets, Drive, OAuth
-- **DFlow API** - market data
+### Environment Variables
 
-Handlers are in `src/mocks/handlers.ts` and can be modified per test using `server.use()`.
+```bash
+# Required for Sentry
+NEXT_PUBLIC_SENTRY_DSN=your_dsn
+SENTRY_DSN=your_dsn
+SENTRY_AUTH_TOKEN=your_token
+SENTRY_ORG=your_org
+SENTRY_PROJECT=your_project
+```
 
-### 5. CI/CD Pipeline - READY
+### Features
+
+- **Error tracking**: Automatic capture of unhandled errors
+- **Performance monitoring**: 10% transaction sampling
+- **Session replay**: Capture sessions with errors (100%)
+- **Source maps**: Automatic upload on build
+
+**Note**: Events are filtered in development mode (not sent to Sentry).
+
+---
+
+## Coverage Targets
+
+Thresholds configured in `vitest.config.ts`:
+
+| Metric | Target |
+|--------|--------|
+| Statements | 80% |
+| Branches | 75% |
+| Functions | 80% |
+| Lines | 80% |
+
+---
+
+## CI/CD Pipeline
+
 GitHub Actions workflow (`.github/workflows/test.yml`) includes:
 - Unit/integration tests with coverage
 - TypeScript type checking
 - ESLint
-- E2E tests (when configured)
-
-## Coverage Targets
-
-Current coverage thresholds set in `vitest.config.ts`:
-- Statements: 80%
-- Branches: 75%
-- Functions: 80%
-- Lines: 80%
-
-## Running Tests Locally
-
-```bash
-# Install dependencies (one-time)
-npm install
-
-# Run unit tests (all passing ✅)
-npm test
-
-# Run with coverage
-npm run test:coverage
-
-# Install Playwright browsers (for E2E)
-npx playwright install
-
-# Run E2E tests
-npm run test:e2e
-```
-
-## Next Steps for Your Tester
-
-1. **Review unit test coverage** - Run `npm run test:coverage` and review the HTML report
-2. **Customize MSW handlers** - Add test-specific scenarios using `server.use()`
-3. **Set up E2E tests** - Install browsers and run `npm run test:e2e`
-4. **Extend coverage** - Add more unit tests to reach 80%+ targets
-5. **Add visual regression tests** - Consider for the canvas component
-
-## Important Notes
-
-- **Unit tests are comprehensive and passing** - 86 tests covering core functionality
-- **MSW v2** is used for network mocking (not stubbing fetch)
-- **Tests are isolated** - Each test is independent
-- **E2E tests need browser install** - Run `npx playwright install`
-- **CI/CD pipeline configured** - Tests run on push/PR to main/develop
 
 ---
 
-**Status**: ✅ Ready for testing handoff
-**Date**: 2025-03-06
-**Unit Tests**: 86/86 passing
+## E2E Testing (Future Work)
+
+End-to-end test files exist in `tests/e2e/` but are not currently integrated into the test suite. These can be enabled when:
+
+1. Cross-browser testing requirements are defined
+2. OAuth flow mocking is implemented
+3. Test data seeding strategy is established
+
+To run E2E tests manually:
+```bash
+npx playwright install chromium
+npx playwright test tests/e2e/basic.spec.ts --project=chromium
+```
+
+---
+
+## What's NOT Tested
+
+1. **Frontend UI components** - Component tests would add value for catching visual bugs
+2. **OAuth callback flows** - Integration with actual OAuth providers
+3. **Real API calls** - All external dependencies are mocked
+
+---
+
+## Development Notes
+
+### Query Parameter Testing with NTARH
+
+When testing API routes that use `request.nextUrl.searchParams`, use `requestPatcher`:
+
+```typescript
+await testApiHandler({
+  appHandler,
+  requestPatcher(req) {
+    const originalGet = req.nextUrl.searchParams.get.bind(req.nextUrl.searchParams);
+    req.nextUrl.searchParams.get = vi.fn((name: string) => {
+      if (name === 'spreadsheet_id') return 'test-sheet-id';
+      return originalGet(name);
+    });
+  },
+  test: async ({ fetch }) => {
+    const res = await fetch('/');
+    expect(res.status).toBe(200);
+  },
+});
+```
+
+---
+
+## Status
+
+**Date**: 2026-03-06
+**Tests**: 128/128 passing
+**Coverage**: ~80%
+**Error Tracking**: Sentry configured

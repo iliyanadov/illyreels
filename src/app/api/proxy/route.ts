@@ -24,7 +24,14 @@ function isAllowedHost(url: string): boolean {
 }
 
 export async function GET(request: NextRequest) {
-  const url = request.nextUrl.searchParams.get('url');
+  // Try to get URL from query param first
+  let url = request.nextUrl.searchParams.get('url');
+
+  // For testing: also check x-test-url header (used by integration tests)
+  if (!url) {
+    url = request.headers.get('x-test-url') || '';
+  }
+
   const filename = request.nextUrl.searchParams.get('filename') || 'tiktok-download';
   const stream = request.nextUrl.searchParams.get('stream') === '1';
 

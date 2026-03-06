@@ -10,6 +10,14 @@ export default defineConfig({
     },
   },
   test: {
+    // Environment variables for tests
+    env: {
+      INSTAGRAM_APP_ID: 'test-instagram-app-id',
+      INSTAGRAM_REDIRECT_URI: 'http://localhost:3000/api/meta/callback',
+      META_GRAPH_VERSION: 'v22.0',
+      DFLOW_API_KEY: 'test-dflow-api-key',
+      DFLOW_API_URL: 'https://c.prediction-markets-api.dflow.net',
+    },
     environment: 'jsdom',
     globals: true,
     setupFiles: ['./vitest.setup.ts'],
