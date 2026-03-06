@@ -1,0 +1,44 @@
+{
+  "seriesTicker": "TESTSERIES",
+  "subtitle": "Test Series",
+  "ticker": "KXENGAGEMENTTIMOTHEEKYLIE-26",
+  "title": "Test Market Event",
+  "competition": "Test Competition",
+  "competitionScope": "global",
+  "imageUrl": "https://example.com/market-image.jpg",
+  "liquidity": 1000000,
+  "markets": [
+    {
+      "ticker": "TESTMARKET-YES",
+      "title": "Yes, it will happen",
+      "yesAsk": "0.65",
+      "yesBid": "0.63",
+      "noAsk": "0.37",
+      "noBid": "0.35",
+      "status": "active",
+      "accounts": {},
+      "canCloseEarly": true,
+      "closeTime": 1735689600000,
+      "eventTicker": "KXENGAGEMENTTIMOTHEEKYLIE-26",
+      "expirationTime": 1735689600000,
+      "marketType": "BINARY",
+      "noSubTitle": "No",
+      "openInterest": 50000,
+      "openTime": 1735603200000,
+      "result": "PENDING",
+      "rulesPrimary": "Standard rules",
+      "subtitle": "Will it happen?",
+      "volume": 50000,
+      "volume24h": 12000,
+      "yesSubTitle": "Yes"
+    }
+  ],
+  "openInterest": 100000,
+  "settlementSources": [
+    { "name": "Test Source", "url": "https://example.com" }
+  ],
+  "strikeDate": 1735689600000,
+  "strikePeriod": "DAILY",
+  "volume": 50000,
+  "volume24h": 12000
+}

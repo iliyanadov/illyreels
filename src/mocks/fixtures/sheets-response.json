@@ -1,0 +1,10 @@
+{
+  "range": "Sheet1!A4:D7",
+  "majorDimension": "ROWS",
+  "values": [
+    ["https://www.tiktok.com/@user/video/123", "Test Caption", "film", "Instagram caption here"],
+    ["https://www.tiktok.com/@user/video/456", "Another Caption", "sports", "Another IG caption"],
+    ["", "", "", ""],
+    ["https://www.tiktok.com/@user/video/789", "Third Caption", "", ""]
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "code": 0,
+  "data": {
+    "id": "7234567890123456789",
+    "title": "Test video description",
+    "cover": "https://p16-sign.tiktokcdn.com/cover.jpg",
+    "author": {
+      "unique_id": "testuser",
+      "nickname": "Test User",
+      "avatar": "https://p16-sign.tiktokcdn.com/avatar.jpg"
+    },
+    "play": "https://v16-webapp-prime.us.tiktok.com/video/sd.mp4",
+    "wmplay": "https://v16-webapp-prime.us.tiktok.com/video/wm.mp4",
+    "hdplay": "https://v16-webapp-prime.us.tiktok.com/video/hd.mp4",
+    "duration": 15,
+    "size": 2048576
+  }
+}
