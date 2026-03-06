@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { upload } from '@vercel/blob/client';
 import Image from 'next/image';
 import { TikTokCanvas, TikTokCanvasRef } from './components/TikTokCanvas';
@@ -150,6 +150,8 @@ export default function Home() {
   const [showSheetsModal, setShowSheetsModal] = useState(false);
   const [spreadsheetId, setSpreadsheetId] = useState('1z9KIhjPJFo9rOJ4CDW-y7W9W4MEm8Lso-EsFRknbv5w');
   const [sheetName, setSheetName] = useState("SonotradeHQ");
+  const [availableSheets, setAvailableSheets] = useState<Array<{ id: string; title: string; index: number }>>([]);
+  const [loadingSheetNames, setLoadingSheetNames] = useState(false);
   const [startRow, setStartRow] = useState('4');
   const [endRow, setEndRow] = useState('32');
   const [loadingSheets, setLoadingSheets] = useState(false);
@@ -194,6 +196,19 @@ export default function Home() {
       checkGoogleConnection();
     }
   }, []);
+
+  // Fetch sheet names when spreadsheetId changes and Google is connected
+  useEffect(() => {
+    if (googleToken && spreadsheetId) {
+      debouncedFetchSheetNames(spreadsheetId);
+    }
+    // Cleanup timeout on unmount
+    return () => {
+      if (sheetNameFetchTimeout.current) {
+        clearTimeout(sheetNameFetchTimeout.current);
+      }
+    };
+  }, [spreadsheetId, googleToken]);
 
   // Check for Google OAuth status in URL on mount
   function getGoogleStatusFromUrl() {
@@ -681,6 +696,52 @@ export default function Home() {
       }, 3000);
     }
   }
+
+  // Fetch available sheet names from Google Sheets
+  const fetchSheetNames = useCallback(async (id: string) => {
+    if (!id.trim()) {
+      setAvailableSheets([]);
+      return;
+    }
+
+    setLoadingSheetNames(true);
+
+    try {
+      const res = await fetch(`/api/google/sheets/metadata?spreadsheet_id=${encodeURIComponent(id.trim())}`);
+
+      if (res.ok) {
+        const data = await res.json();
+        setAvailableSheets(data.sheets || []);
+
+        // Auto-select the first sheet if current selection is not in the list
+        if (data.sheets && data.sheets.length > 0) {
+          const currentExists = data.sheets.some((s: { title: string }) => s.title === sheetName);
+          if (!currentExists) {
+            setSheetName(data.sheets[0].title);
+          }
+        }
+      } else {
+        // If metadata fetch fails, just clear available sheets
+        setAvailableSheets([]);
+      }
+    } catch (error) {
+      console.error('[Sheets] Failed to fetch sheet names:', error);
+      setAvailableSheets([]);
+    } finally {
+      setLoadingSheetNames(false);
+    }
+  }, []); // Empty deps - we'll handle state updates carefully
+
+  // Debounced fetch for sheet names
+  const sheetNameFetchTimeout = useRef<NodeJS.Timeout | null>(null);
+  const debouncedFetchSheetNames = useCallback((id: string) => {
+    if (sheetNameFetchTimeout.current) {
+      clearTimeout(sheetNameFetchTimeout.current);
+    }
+    sheetNameFetchTimeout.current = setTimeout(() => {
+      fetchSheetNames(id);
+    }, 500); // 500ms debounce
+  }, []);
 
   async function importFromSheets() {
     if (!googleToken || !spreadsheetId.trim()) {
@@ -1230,15 +1291,46 @@ export default function Home() {
                 <label className="block text-sm font-medium text-zinc-400 mb-2">
                   Sheet Name
                 </label>
-                <input
-                  type="text"
-                  value={sheetName}
-                  onChange={e => setSheetName(e.target.value)}
-                  placeholder="SonotradeHQ"
-                  className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white placeholder-zinc-500 outline-none focus:border-zinc-600 transition-colors"
-                />
+                {availableSheets.length > 0 ? (
+                  <div className="relative">
+                    <select
+                      value={sheetName}
+                      onChange={e => setSheetName(e.target.value)}
+                      disabled={loadingSheetNames}
+                      className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white outline-none focus:border-zinc-600 transition-colors disabled:opacity-50"
+                    >
+                      {availableSheets.map(sheet => (
+                        <option key={sheet.id} value={sheet.title}>
+                          {sheet.title}
+                        </option>
+                      ))}
+                    </select>
+                    {loadingSheetNames && (
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-zinc-500">
+                        Loading...
+                      </span>
+                    )}
+                  </div>
+                ) : (
+                  <input
+                    type="text"
+                    value={sheetName}
+                    onChange={e => {
+                      setSheetName(e.target.value);
+                      // Clear available sheets if user types manually
+                      if (availableSheets.length > 0 && spreadsheetId) {
+                        debouncedFetchSheetNames(spreadsheetId);
+                      }
+                    }}
+                    placeholder="SonotradeHQ"
+                    className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white placeholder-zinc-500 outline-none focus:border-zinc-600 transition-colors"
+                  />
+                )}
                 <p className="mt-1 text-xs text-zinc-500">
-                  The name of the tab (usually "Sheet1")
+                  {availableSheets.length > 0
+                    ? `${availableSheets.length} sheet${availableSheets.length !== 1 ? 's' : ''} available`
+                    : 'Enter spreadsheet ID above to load sheets'
+                  }
                 </p>
               </div>
 
