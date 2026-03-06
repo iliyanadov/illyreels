@@ -155,8 +155,10 @@ export default function Home() {
   const [loadingSheets, setLoadingSheets] = useState(false);
   const [sheetsError, setSheetsError] = useState('');
 
-  // Instagram state (simplified - no account selection needed)
+  // Instagram state (multi-account support)
   const [igUser, setIgUser] = useState<InstagramUser | null>(null);
+  const [allAccounts, setAllAccounts] = useState<Array<{ igUserId: string; igUsername: string; isActive: boolean }>>([]);
+  const [showAccountDropdown, setShowAccountDropdown] = useState(false);
   const [metaError, setMetaError] = useState('');
   const [loadingIgUser, setLoadingIgUser] = useState(false);
 
@@ -174,11 +176,16 @@ export default function Home() {
     const metaStatus = getMetaStatusFromUrl();
     if (metaStatus) {
       if (metaStatus.connected) {
-        // Fetch Instagram user info after successful connection
+        // Fetch Instagram user info and accounts after successful connection
         fetchInstagramUser();
+        fetchAllAccounts();
       } else if (metaStatus.error) {
         setMetaError(metaStatus.error);
       }
+    } else {
+      // Also check for existing accounts on page load
+      fetchInstagramUser();
+      fetchAllAccounts();
     }
 
     // Check for Google connection status from URL (after OAuth redirect)
@@ -481,6 +488,35 @@ export default function Home() {
     }
   }
 
+  async function fetchAllAccounts() {
+    try {
+      const res = await fetch('/api/meta/accounts');
+      if (res.ok) {
+        const data = await res.json();
+        setAllAccounts(data.accounts || []);
+      }
+    } catch (error) {
+      console.error('[Instagram] Failed to fetch accounts:', error);
+    }
+  }
+
+  async function switchAccount(igUserId: string) {
+    try {
+      const res = await fetch('/api/meta/switch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ igUserId }),
+      });
+      if (res.ok) {
+        await fetchInstagramUser();
+        await fetchAllAccounts();
+        setShowAccountDropdown(false);
+      }
+    } catch (error) {
+      console.error('[Instagram] Failed to switch account:', error);
+    }
+  }
+
   async function handleUploadToInstagram(entryId: string, blob: Blob, filename: string) {
     const entry = entries.find(e => e.id === entryId);
     if (!entry) return;
@@ -546,13 +582,25 @@ export default function Home() {
     }
   }
 
-  async function disconnectMeta() {
+  async function disconnectMeta(igUserId?: string) {
     try {
-      await fetch('/api/meta/disconnect', { method: 'POST' });
+      if (igUserId) {
+        // Disconnect specific account
+        await fetch('/api/meta/disconnect', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ igUserId }),
+        });
+      } else {
+        // Disconnect all
+        await fetch('/api/meta/disconnect', { method: 'POST' });
+      }
+      // Refresh state
+      await fetchInstagramUser();
+      await fetchAllAccounts();
     } catch (error) {
-      // Ignore error
+      console.error('[Instagram] Failed to disconnect:', error);
     }
-    setIgUser(null);
   }
 
   async function handleExportComplete(entryId: string, blob: Blob, filename: string) {
@@ -732,17 +780,88 @@ export default function Home() {
           )}
           <div className="w-px h-6 bg-zinc-800 mx-1"></div>
 
-          {/* Instagram Connection */}
+          {/* Instagram Connection - Multi-Account Support */}
           {igUser ? (
-            <>
-              <span className="text-xs text-pink-400">✓ @{igUser.username}</span>
+            <div className="relative">
+              {/* Account Dropdown Button */}
               <button
-                onClick={disconnectMeta}
-                className="rounded-lg border border-zinc-700 px-3 py-2 text-xs font-semibold text-zinc-400 hover:border-red-500 hover:text-red-400 transition-colors"
+                onClick={() => setShowAccountDropdown(!showAccountDropdown)}
+                className="flex items-center gap-2 rounded-lg border border-pink-900/50 bg-pink-950/20 px-3 py-2 text-xs font-semibold text-pink-400 hover:border-pink-700 transition-colors"
               >
-                Disconnect
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/>
+                </svg>
+                @{igUser.username || 'Loading...'}
+                <svg className={`w-3 h-3 transition-transform ${showAccountDropdown ? 'rotate-180' : ''}`} width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M7 10l5 5 5-5z"/>
+                </svg>
               </button>
-            </>
+
+              {/* Dropdown Menu */}
+              {showAccountDropdown && allAccounts.length > 0 && (
+                <div className="absolute top-full right-0 mt-1 w-48 rounded-lg border border-zinc-700 bg-zinc-900 shadow-xl z-50">
+                  <div className="p-2 border-b border-zinc-700">
+                    <div className="text-xs text-zinc-500 font-semibold mb-1">Instagram Accounts</div>
+                  </div>
+                  {allAccounts.map((account) => (
+                    <div
+                      key={account.igUserId}
+                      className="flex items-center justify-between px-3 py-2 hover:bg-zinc-800 cursor-pointer group"
+                    >
+                      <button
+                        onClick={() => switchAccount(account.igUserId)}
+                        className="flex-1 text-left flex items-center gap-2"
+                      >
+                        {account.isActive && (
+                          <svg className="w-3 h-3 text-pink-400" width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
+                          </svg>
+                        )}
+                        <span className={`text-xs ${account.isActive ? 'text-pink-400 font-semibold' : 'text-zinc-400'}`}>
+                          @{account.igUsername}
+                        </span>
+                        {account.isActive && (
+                          <span className="text-[10px] text-zinc-500">(active)</span>
+                        )}
+                      </button>
+                      {!account.isActive && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            disconnectMeta(account.igUserId);
+                          }}
+                          className="opacity-0 group-hover:opacity-100 p-1 text-zinc-500 hover:text-red-400 transition-opacity"
+                          title="Remove account"
+                        >
+                          <svg className="w-3 h-3" width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+                          </svg>
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                  <div className="p-2 border-t border-zinc-700">
+                    <button
+                      onClick={connectMeta}
+                      className="w-full flex items-center justify-center gap-2 rounded-md border border-zinc-600 bg-zinc-800 px-3 py-1.5 text-xs font-semibold text-zinc-300 hover:bg-zinc-700 hover:border-zinc-500 transition-colors"
+                    >
+                      <svg className="w-3 h-3" width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
+                      </svg>
+                      Add Account
+                    </button>
+                    {allAccounts.length > 1 && (
+                      <button
+                        onClick={() => disconnectMeta()}
+                        className="w-full mt-1 text-xs text-zinc-500 hover:text-red-400 transition-colors"
+                      >
+                        Disconnect All
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
           ) : (
             <button
               onClick={connectMeta}
