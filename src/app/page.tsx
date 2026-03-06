@@ -180,6 +180,15 @@ export default function Home() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadStatus, setUploadStatus] = useState('');
 
+  // Bulk upload to Instagram state
+  const [bulkUploading, setBulkUploading] = useState(false);
+  const [bulkUploadPaused, setBulkUploadPaused] = useState(false);
+  const [bulkUploadProgress, setBulkUploadProgress] = useState(0);
+  const [bulkUploadStatus, setBulkUploadStatus] = useState('');
+  const [bulkUploadTotal, setBulkUploadTotal] = useState(0);
+  const [bulkUploadCompleted, setBulkUploadCompleted] = useState(0);
+  const bulkUploadAbortRef = useRef(false);
+
   // Check for OAuth tokens on mount
   useEffect(() => {
     // Check Google connection status from API
@@ -470,6 +479,92 @@ export default function Home() {
         }
       }
     }
+  }
+
+  async function uploadAllToInstagram() {
+    // Get all entries with fetched video data
+    const entriesToUpload = entries.filter(e => e.data && !e.loading && !(e.data.images && e.data.images.length > 0));
+
+    if (entriesToUpload.length === 0) {
+      setBulkUploadStatus('No videos to upload');
+      return;
+    }
+
+    // Reset state
+    bulkUploadAbortRef.current = false;
+    setBulkUploading(true);
+    setBulkUploadPaused(false);
+    setBulkUploadCompleted(0);
+    setBulkUploadTotal(entriesToUpload.length);
+    setBulkUploadProgress(0);
+    setBulkUploadStatus(`Starting upload of ${entriesToUpload.length} videos...`);
+
+    // Upload each video sequentially
+    for (let i = 0; i < entriesToUpload.length; i++) {
+      const entry = entriesToUpload[i];
+
+      // Check if aborted
+      if (bulkUploadAbortRef.current) {
+        setBulkUploadStatus('Upload cancelled');
+        setBulkUploading(false);
+        return;
+      }
+
+      // Wait while paused
+      while (bulkUploadPaused && !bulkUploadAbortRef.current) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+
+      // Check again after pause
+      if (bulkUploadAbortRef.current) {
+        setBulkUploadStatus('Upload cancelled');
+        setBulkUploading(false);
+        return;
+      }
+
+      const canvasRef = canvasRefsMap.current.get(entry.id);
+      if (canvasRef && canvasRef.startUpload) {
+        setBulkUploadStatus(`Uploading video ${i + 1} of ${entriesToUpload.length}...`);
+        try {
+          // Use startUpload instead of startDownload to upload to Instagram
+          await canvasRef.startUpload();
+          setBulkUploadCompleted(i + 1);
+          setBulkUploadProgress(Math.round(((i + 1) / entriesToUpload.length) * 100));
+          // Add a small delay between uploads to avoid rate limiting
+          await new Promise(resolve => setTimeout(resolve, 2000));
+        } catch (error) {
+          console.error(`Failed to upload video ${entry.id}:`, error);
+          setBulkUploadStatus(`Failed to upload video ${i + 1}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+          // Continue with next video instead of stopping
+        }
+      }
+    }
+
+    setBulkUploadStatus(`Upload complete! ${entriesToUpload.length} videos uploaded.`);
+    setBulkUploading(false);
+
+    // Clear status after 5 seconds
+    setTimeout(() => {
+      if (!bulkUploading) {
+        setBulkUploadStatus('');
+        setBulkUploadProgress(0);
+      }
+    }, 5000);
+  }
+
+  function toggleBulkUploadPause() {
+    setBulkUploadPaused(prev => {
+      const newValue = !prev;
+      setBulkUploadStatus(newValue ? 'Paused' : `Uploading video ${bulkUploadCompleted + 1} of ${bulkUploadTotal}...`);
+      return newValue;
+    });
+  }
+
+  function cancelBulkUpload() {
+    bulkUploadAbortRef.current = true;
+    setBulkUploadStatus('Cancelling...');
+    setBulkUploading(false);
+    setBulkUploadPaused(false);
   }
 
   async function connectGoogle() {
@@ -1196,11 +1291,66 @@ export default function Home() {
       {/* Render all canvases for fetched videos in a grid */}
       {entries.filter(e => e.data && !e.loading && !(e.data.images && e.data.images.length > 0)).length > 0 && (
         <div className="w-full max-w-[1800px] mt-8">
+          {/* Bulk Upload Progress Bar */}
+          {bulkUploading && (
+            <div className="mb-4 mx-auto max-w-xl">
+              <div className="rounded-lg border border-pink-700 bg-pink-950/20 px-4 py-3">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-semibold text-pink-400">
+                    {bulkUploadStatus || `Uploading ${bulkUploadCompleted} of ${bulkUploadTotal}...`}
+                  </span>
+                  <span className="text-xs text-zinc-400">{bulkUploadProgress}%</span>
+                </div>
+                <div className="h-2 bg-zinc-800 rounded-full overflow-hidden mb-3">
+                  <div
+                    className="h-full bg-gradient-to-r from-purple-500 via-pink-500 to-orange-400 transition-all duration-300"
+                    style={{ width: `${bulkUploadProgress}%` }}
+                  />
+                </div>
+                <div className="flex items-center justify-center gap-2">
+                  {bulkUploadPaused ? (
+                    <button
+                      onClick={toggleBulkUploadPause}
+                      className="flex items-center gap-1 rounded-md bg-green-600/20 px-3 py-1.5 text-xs font-semibold text-green-400 hover:bg-green-600/30 transition-colors"
+                    >
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                        <polygon points="5 3 19 12 5 21 5 3"/>
+                      </svg>
+                      Resume
+                    </button>
+                  ) : (
+                    <button
+                      onClick={toggleBulkUploadPause}
+                      className="flex items-center gap-1 rounded-md bg-yellow-600/20 px-3 py-1.5 text-xs font-semibold text-yellow-400 hover:bg-yellow-600/30 transition-colors"
+                    >
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                        <rect x="6" y="4" width="4" height="16"/>
+                        <rect x="14" y="4" width="4" height="16"/>
+                      </svg>
+                      Pause
+                    </button>
+                  )}
+                  <button
+                    onClick={cancelBulkUpload}
+                    className="flex items-center gap-1 rounded-md bg-red-600/20 px-3 py-1.5 text-xs font-semibold text-red-400 hover:bg-red-600/30 transition-colors"
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <line x1="18" y1="6" x2="6" y2="18"/>
+                      <line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Download/Upload All Buttons */}
           <div className="flex justify-center gap-3 mb-4">
             <button
               onClick={downloadAll}
-              className="flex items-center gap-2 rounded-lg bg-[#fe2c55] px-6 py-3 text-sm font-semibold text-white hover:opacity-90 transition-opacity"
+              disabled={bulkUploading}
+              className="flex items-center gap-2 rounded-lg bg-[#fe2c55] px-6 py-3 text-sm font-semibold text-white hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
@@ -1211,15 +1361,16 @@ export default function Home() {
             </button>
             {igUser && googleToken && (
               <button
-                onClick={downloadAll}
-                className="flex items-center gap-2 rounded-lg bg-gradient-to-r from-purple-500 via-pink-500 to-orange-400 px-6 py-3 text-sm font-semibold text-white hover:opacity-90 transition-opacity"
+                onClick={uploadAllToInstagram}
+                disabled={bulkUploading}
+                className="flex items-center gap-2 rounded-lg bg-gradient-to-r from-purple-500 via-pink-500 to-orange-400 px-6 py-3 text-sm font-semibold text-white hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M12 2v16M12 2l-4 4M12 2l4 4"/>
                   <path d="M2 12h4M2 12l4-4M2 12l4 4"/>
                   <path d="M22 12h-4M22 12l-4-4M22 12l4 4"/>
                 </svg>
-                Upload All to Instagram
+                {bulkUploading ? 'Uploading...' : 'Upload All to Instagram'}
               </button>
             )}
           </div>
