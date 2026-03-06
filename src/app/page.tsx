@@ -108,6 +108,7 @@ interface VideoEntry {
   marketError: string;
   videoFailed: boolean; // Track if video failed to load in canvas
   instagramPermalink?: string; // Instagram URL after successful publish
+  sheetRow?: number; // The actual spreadsheet row number (for display and updating)
 }
 
 function formatBytes(bytes: number): string {
@@ -179,6 +180,10 @@ export default function Home() {
   const [uploadingEntry, setUploadingEntry] = useState<string | null>(null);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadStatus, setUploadStatus] = useState('');
+
+  // Instagram upload queue (ensures only one upload at a time)
+  const uploadQueueRef = useRef<Array<{ entryId: string; blob: Blob; filename: string }>>([]);
+  const isProcessingUploadRef = useRef(false);
 
   // Bulk upload to Instagram state
   const [bulkUploading, setBulkUploading] = useState(false);
@@ -651,7 +656,26 @@ export default function Home() {
     }
   }
 
-  async function handleUploadToInstagram(entryId: string, blob: Blob, filename: string) {
+  // Process the upload queue (one upload at a time)
+  async function processUploadQueue() {
+    if (isProcessingUploadRef.current || uploadQueueRef.current.length === 0) {
+      return;
+    }
+
+    isProcessingUploadRef.current = true;
+    const { entryId, blob, filename } = uploadQueueRef.current.shift()!;
+
+    await processSingleUpload(entryId, blob, filename);
+
+    // Process next in queue if any
+    if (uploadQueueRef.current.length > 0) {
+      setTimeout(() => processUploadQueue(), 500);
+    } else {
+      isProcessingUploadRef.current = false;
+    }
+  }
+
+  async function processSingleUpload(entryId: string, blob: Blob, filename: string) {
     const entry = entries.find(e => e.id === entryId);
     if (!entry) return;
 
@@ -707,6 +731,24 @@ export default function Home() {
           : e
       ));
 
+      // Update Google Sheet status to "published" if we have the row number
+      if (entry.sheetRow !== undefined && googleToken && spreadsheetId && sheetName) {
+        try {
+          await fetch('/api/google/sheets/update', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              spreadsheetId,
+              sheetName,
+              rowNumber: entry.sheetRow,
+              status: 'published'
+            }),
+          });
+          console.log('[Sheets] Updated row', entry.sheetRow, 'to "published"');
+        } catch (error) {
+          console.error('[Sheets] Failed to update sheet status:', error);
+        }
+      }
 
       // Clear the uploading state after a delay
       setTimeout(() => {
@@ -722,6 +764,22 @@ export default function Home() {
         setUploadStatus('');
         setUploadProgress(0);
       }, 5000);
+    }
+  }
+
+  async function handleUploadToInstagram(entryId: string, blob: Blob, filename: string) {
+    // Add to queue
+    uploadQueueRef.current.push({ entryId, blob, filename });
+
+    // Show queued status if there are items waiting
+    if (isProcessingUploadRef.current) {
+      const queuePosition = uploadQueueRef.current.length;
+      setUploadStatus(`Queued (${queuePosition} in line)...`);
+    }
+
+    // Start processing if not already processing
+    if (!isProcessingUploadRef.current) {
+      processUploadQueue();
     }
   }
 
@@ -907,7 +965,8 @@ export default function Home() {
         loadingMarket: false,
         error: '',
         marketError: '',
-        videoFailed: false
+        videoFailed: false,
+        sheetRow: row.sheetRow // Store the actual spreadsheet row number
       }));
 
       // Replace current entries with imported ones
@@ -1377,11 +1436,12 @@ export default function Home() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2">
             {entries.filter(e => e.data && !e.loading && !(e.data.images && e.data.images.length > 0)).map((entry) => {
-              const rowIndex = entries.findIndex(e => e.id === entry.id);
               return (
                 <div key={entry.id} className="flex flex-col">
                   <div className="flex items-center justify-between px-2 py-1 mb-1">
-                    <span className="text-xs font-semibold text-zinc-500">Row {rowIndex + 1}</span>
+                    <span className="text-xs font-semibold text-zinc-500">
+                      Row {entry.sheetRow !== undefined ? entry.sheetRow : '?'}
+                    </span>
                   </div>
                   <TikTokCanvas
                     ref={(ref) => {
@@ -1393,7 +1453,7 @@ export default function Home() {
                     }}
                     videoSrc={proxyStreamUrl(entry.data!.play || entry.data!.hdplay || entry.data!.wmplay)}
                     videoId={entry.data!.id}
-                    rowNumber={rowIndex}
+                    rowNumber={entry.sheetRow !== undefined ? entry.sheetRow - 1 : 0}
                     onVideoError={() => handleVideoError(entry.id)}
                     onExportComplete={(blob, filename) => handleExportComplete(entry.id, blob, filename)}
                     onUploadToInstagram={(blob, filename) => handleUploadToInstagram(entry.id, blob, filename)}
