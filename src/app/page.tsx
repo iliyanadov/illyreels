@@ -246,7 +246,7 @@ export default function Home() {
     ));
   }
 
-  function updateEntry(id: string, field: 'url' | 'caption' | 'tag' | 'change', value: string) {
+  function updateEntry(id: string, field: 'url' | 'caption' | 'tag' | 'change' | 'instagramCaption', value: string) {
     setEntries(prevEntries => prevEntries.map(e => e.id === id ? { ...e, [field]: value } : e));
   }
 
@@ -918,6 +918,20 @@ export default function Home() {
                         />
                       </td>
                     )}
+                    <td className="px-4 py-3">
+                      <textarea
+                        value={entry.instagramCaption}
+                        onChange={e => updateEntry(entry.id, 'instagramCaption', e.target.value)}
+                        onKeyDown={e => {
+                          if ((e.metaKey || e.ctrlKey) && e.key === 'z') {
+                            e.preventDefault();
+                          }
+                        }}
+                        placeholder="Instagram caption..."
+                        rows={2}
+                        className="w-full min-h-[60px] resize-none rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white placeholder-zinc-500 outline-none focus:border-purple-500 transition-colors"
+                      />
+                    </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-center gap-2">
                         <button
