@@ -7,10 +7,10 @@ interface SheetRow {
   url: string;
   caption: string;
   tag: string;
+  instagramCaption: string;
 }
 
 export async function GET(request: NextRequest) {
-  // Get token from cookie (server-side)
   const tokenData = await getGoogleToken();
 
   if (!tokenData) {
@@ -34,7 +34,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const range = `${encodeURIComponent(sheetName)}!A${startRow}:C${endRow}`;
+    const range = `${encodeURIComponent(sheetName)}!A${startRow}:D${endRow}`;
     const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}`;
 
     console.log('[Google Sheets] Fetching from:', url);
@@ -46,30 +46,28 @@ export async function GET(request: NextRequest) {
       },
     });
 
-    const responseText = await response.text();
-    console.log('[Google Sheets] API response status:', response.status);
-
     if (!response.ok) {
-      console.error('[Google Sheets] API error response:', responseText);
+      console.error('[Google Sheets] API error response:', await response.text());
       return NextResponse.json(
-        { error: `API Error (${response.status}): ${responseText}` },
+        { error: `API Error (${response.status}): ${response.statusText}` },
         { status: response.status }
       );
     }
 
-    const data = JSON.parse(responseText);
+    const data = await response.json();
     const values = data.values;
 
     if (!values || values.length === 0) {
       return NextResponse.json({ rows: [] });
     }
 
-    // Transform rows into the expected format
+    // Map columns: A=url, B=caption (heading), C=tag, D=instagramCaption
     const rows: SheetRow[] = values
       .map((row: string[]) => {
         const url = row[0]?.trim() || '';
-        const caption = row[1]?.trim() || '';
-        const tag = row[2]?.trim() || '';
+        const caption = row[1]?.trim() || '';          // Column B - Heading caption
+        const tag = row[2]?.trim() || '';             // Column C - Tag
+        const instagramCaption = row[3]?.trim() || ''; // Column D - Instagram caption
 
         // Skip rows without URL
         if (!url) return null;
@@ -78,6 +76,7 @@ export async function GET(request: NextRequest) {
           url,
           caption,
           tag,
+          instagramCaption,
         };
       })
       .filter((row: SheetRow | null): row is SheetRow => row !== null);

@@ -98,6 +98,7 @@ interface VideoEntry {
   url: string;
   caption: string;
   tag: string;
+  instagramCaption: string;
   change: string;
   data: VideoData | null;
   marketData: EventData | null;
@@ -135,7 +136,7 @@ const TAG_TO_EVENT_ID: Record<string, string> = {
 
 export default function Home() {
   const [entries, setEntries] = useState<VideoEntry[]>([
-    { id: '1', url: '', caption: '', tag: '', change: '', data: null, marketData: null, loading: false, loadingMarket: false, error: '', marketError: '', videoFailed: false }
+    { id: '1', url: '', caption: '', tag: '', instagramCaption: '', change: '', data: null, marketData: null, loading: false, loadingMarket: false, error: '', marketError: '', videoFailed: false }
   ]);
 
   // Store refs for each canvas to trigger downloads
@@ -148,7 +149,7 @@ export default function Home() {
   const [googleToken, setGoogleToken] = useState<{ accessToken: string; refreshToken?: string } | null>(null);
   const [showSheetsModal, setShowSheetsModal] = useState(false);
   const [spreadsheetId, setSpreadsheetId] = useState('1z9KIhjPJFo9rOJ4CDW-y7W9W4MEm8Lso-EsFRknbv5w');
-  const [sheetName, setSheetName] = useState('Sheet1');
+  const [sheetName, setSheetName] = useState("SonotradeHQ");
   const [startRow, setStartRow] = useState('4');
   const [endRow, setEndRow] = useState('32');
   const [loadingSheets, setLoadingSheets] = useState(false);
@@ -216,6 +217,7 @@ export default function Home() {
       url: '',
       caption: '',
       tag: '',
+      instagramCaption: '',
       change: '',
       data: null,
       marketData: null,
@@ -234,7 +236,7 @@ export default function Home() {
 
   function resetEverything() {
     setEntries([
-      { id: '1', url: '', caption: '', tag: '', change: '', data: null, marketData: null, loading: false, loadingMarket: false, error: '', marketError: '', videoFailed: false }
+      { id: '1', url: '', caption: '', tag: '', instagramCaption: '', change: '', data: null, marketData: null, loading: false, loadingMarket: false, error: '', marketError: '', videoFailed: false }
     ]);
   }
 
@@ -505,7 +507,7 @@ export default function Home() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           videoUrl: uploadedBlob.url,
-          caption: entry.caption || '',
+          caption: entry.instagramCaption || entry.caption || '',
           shareToFeed: false,
         }),
       });
@@ -660,6 +662,7 @@ export default function Home() {
         url: row.url,
         caption: row.caption,
         tag: row.tag || '',
+        instagramCaption: row.instagramCaption || '',
         change: row.change || '',
         data: null,
         marketData: null,
@@ -672,7 +675,7 @@ export default function Home() {
 
       // Replace current entries with imported ones
       setEntries(newEntries.length > 0 ? newEntries : [
-        { id: '1', url: '', caption: '', tag: '', data: null, marketData: null, loading: false, loadingMarket: false, error: '', marketError: '', videoFailed: false }
+        { id: '1', url: '', caption: '', tag: '', instagramCaption: '', data: null, marketData: null, loading: false, loadingMarket: false, error: '', marketError: '', videoFailed: false }
       ]);
 
       setShowSheetsModal(false);
@@ -829,6 +832,9 @@ export default function Home() {
                   </th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-400 uppercase tracking-wider">
                     Event ID
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-400 uppercase tracking-wider">
+                    Instagram Caption
                   </th>
                   {brandMode === 'forum' && (
                     <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-400 uppercase tracking-wider w-32">
@@ -1095,7 +1101,7 @@ export default function Home() {
                   type="text"
                   value={sheetName}
                   onChange={e => setSheetName(e.target.value)}
-                  placeholder="Sheet1"
+                  placeholder="SonotradeHQ"
                   className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white placeholder-zinc-500 outline-none focus:border-zinc-600 transition-colors"
                 />
                 <p className="mt-1 text-xs text-zinc-500">
