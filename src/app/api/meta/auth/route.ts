@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
 
-// Scopes for Instagram Business Login (Content Publishing)
+// Scopes for Instagram Basic Display (for Content Publishing)
 const SCOPES = [
   'instagram_business_basic',
   'instagram_business_content_publish',
@@ -30,7 +30,7 @@ export async function GET(request: NextRequest) {
     // Generate a random state parameter for security
     const state = crypto.randomUUID();
 
-    // Build the Instagram OAuth authorize URL (Business Login for Instagram)
+    // Build the Instagram OAuth authorize URL
     const params = new URLSearchParams({
       client_id: appId,
       redirect_uri: redirectUri,

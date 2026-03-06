@@ -6,21 +6,20 @@ export const runtime = 'nodejs';
 interface InstagramUser {
   id: string;
   username: string;
-  account_type: string; // BUSINESS or MEDIA_CREATOR
+  account_type?: string;
 }
 
 /**
  * Fetch the authenticated Instagram user's info
- * This replaces the old /pages endpoint that discovered accounts via Facebook Pages
+ * Uses Instagram Graph API (not Facebook)
  */
 async function getInstagramUser(accessToken: string): Promise<InstagramUser> {
-  const graphVersion = process.env.META_GRAPH_VERSION || 'v22.0';
-
-  // Get the user's Instagram business account
-  // The fields endpoint returns the authenticated user's IG account info
-  const url = new URL(`https://graph.facebook.com/${graphVersion}/me`);
-  url.searchParams.set('fields', 'instagram_business_account{id,username,account_type}');
+  // Use Instagram's Graph API to fetch user info
+  const url = new URL('https://graph.instagram.com/me');
+  url.searchParams.set('fields', 'id,username,account_type');
   url.searchParams.set('access_token', accessToken);
+
+  console.log('[Instagram Me] Fetching from:', url.toString());
 
   const response = await fetch(url.toString());
 
@@ -31,15 +30,17 @@ async function getInstagramUser(accessToken: string): Promise<InstagramUser> {
 
   const data = await response.json();
 
+  console.log('[Instagram Me] Response:', JSON.stringify(data));
+
   if (data.error) {
-    throw new Error(`API error: ${data.error.message || data.error.type}`);
+    throw new Error(`API error: ${data.error.message || data.error.type || JSON.stringify(data.error)}`);
   }
 
-  if (!data.instagram_business_account) {
-    throw new Error('No Instagram Business account found. Make sure your Instagram account is a Business or Creator account.');
+  if (!data.id) {
+    throw new Error('No user ID in response');
   }
 
-  return data.instagram_business_account;
+  return data;
 }
 
 export async function GET(request: NextRequest) {
@@ -54,7 +55,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    console.log('[Instagram Me] Fetching user info...');
+    console.log('[Instagram Me] Token exists, fetching user info...');
 
     const user = await getInstagramUser(token.userAccessToken);
 
@@ -73,14 +74,6 @@ export async function GET(request: NextRequest) {
     });
   } catch (error: any) {
     console.error('[Instagram Me] Error:', error?.message || error);
-
-    // If the error is about expired token, clear it
-    if (error?.message?.includes('expired') || error?.message?.includes('token') || error?.message?.includes('authenticate')) {
-      return NextResponse.json(
-        { error: 'Your Instagram session has expired. Please reconnect your account.' },
-        { status: 401 }
-      );
-    }
 
     return NextResponse.json(
       { error: error?.message || 'Failed to fetch Instagram user info' },

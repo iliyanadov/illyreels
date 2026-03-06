@@ -5,18 +5,6 @@ import Image from 'next/image';
 import { TikTokCanvas, TikTokCanvasRef } from './components/TikTokCanvas';
 
 // Check for Google OAuth tokens in URL on mount
-function getGoogleTokensFromUrl() {
-  if (typeof window === 'undefined') return null;
-  const params = new URLSearchParams(window.location.search);
-  const accessToken = params.get('google_access_token');
-  const refreshToken = params.get('google_refresh_token');
-  if (accessToken) {
-    // Clean URL
-    window.history.replaceState({}, '', window.location.pathname);
-    return { accessToken, refreshToken: refreshToken || undefined };
-  }
-  return null;
-}
 
 // Check for Meta OAuth status in URL on mount
 function getMetaStatusFromUrl() {
@@ -176,10 +164,8 @@ export default function Home() {
 
   // Check for OAuth tokens on mount
   useEffect(() => {
-    const tokens = getGoogleTokensFromUrl();
-    if (tokens) {
-      setGoogleToken(tokens);
-    }
+    // Check Google connection status from API
+    checkGoogleConnection();
 
     // Check for Meta connection status
     const metaStatus = getMetaStatusFromUrl();
@@ -191,7 +177,36 @@ export default function Home() {
         setMetaError(metaStatus.error);
       }
     }
+
+    // Check for Google connection status from URL (after OAuth redirect)
+    const googleStatus = getGoogleStatusFromUrl();
+    if (googleStatus?.connected) {
+      checkGoogleConnection();
+    }
   }, []);
+
+  // Check for Google OAuth status in URL on mount
+  function getGoogleStatusFromUrl() {
+    if (typeof window === 'undefined') return null;
+    const params = new URLSearchParams(window.location.search);
+    const google = params.get('google');
+    // Clean URL
+    window.history.replaceState({}, '', window.location.pathname);
+    return { connected: google === 'connected' };
+  }
+
+  async function checkGoogleConnection() {
+    try {
+      const res = await fetch('/api/google/me');
+      if (res.ok) {
+        // Google is connected - set a placeholder token
+        setGoogleToken({ accessToken: 'connected' });
+      }
+    } catch (error) {
+      // Not connected
+      setGoogleToken(null);
+    }
+  }
 
   function addRow() {
     setEntries([...entries, {
@@ -416,6 +431,15 @@ export default function Home() {
     }
   }
 
+  async function disconnectGoogle() {
+    try {
+      await fetch('/api/google/me', { method: 'DELETE' });
+      setGoogleToken(null);
+    } catch (error) {
+      console.error('Failed to disconnect Google:', error);
+    }
+  }
+
   async function connectMeta() {
     try {
       const res = await fetch('/api/meta/auth');
@@ -552,7 +576,7 @@ export default function Home() {
 
     try {
       const res = await fetch(
-        `/api/google/sheets?access_token=${encodeURIComponent(googleToken.accessToken)}&spreadsheet_id=${encodeURIComponent(spreadsheetId.trim())}&start_row=${startRow}&end_row=${endRow}&sheet_name=${encodeURIComponent(sheetName.trim())}`
+        `/api/google/sheets?spreadsheet_id=${encodeURIComponent(spreadsheetId.trim())}&start_row=${startRow}&end_row=${endRow}&sheet_name=${encodeURIComponent(sheetName.trim())}`
       );
 
       const data = await res.json();
@@ -619,7 +643,7 @@ export default function Home() {
                 Import from Sheets
               </button>
               <button
-                onClick={() => setGoogleToken(null)}
+                onClick={disconnectGoogle}
                 className="rounded-lg border border-zinc-700 px-3 py-2 text-xs font-semibold text-zinc-400 hover:border-red-500 hover:text-red-400 transition-colors"
               >
                 Disconnect

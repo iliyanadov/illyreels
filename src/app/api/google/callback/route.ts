@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { google } from 'googleapis';
+import { setGoogleToken } from '@/lib/google-token-storage';
 
 export const runtime = 'nodejs';
 
@@ -15,21 +16,17 @@ export async function GET(request: NextRequest) {
   const error = searchParams.get('error');
 
   if (error) {
-    return NextResponse.redirect(
-      new URL(`/?google_error=${encodeURIComponent(error)}`, request.url)
-    );
+    return errorPage(`OAuth denied: ${error}`);
   }
 
   if (!code) {
-    return NextResponse.redirect(
-      new URL('/?google_error=no_code', request.url)
-    );
+    return errorPage('No authorization code received from Google');
   }
 
   try {
-    console.log('Exchanging code for tokens...');
+    console.log('[Google Callback] Exchanging code for tokens...');
 
-    // Exchange code for tokens using getToken (not getAccessToken)
+    // Exchange code for tokens
     const { tokens } = await oauth2Client.getToken(code);
     oauth2Client.setCredentials(tokens);
 
@@ -40,21 +37,58 @@ export async function GET(request: NextRequest) {
       throw new Error('No access token received');
     }
 
-    console.log('Token exchange successful');
+    console.log('[Google Callback] Token exchange successful');
 
-    // Redirect back to app with tokens (in practice, you'd store these securely)
-    const redirectUrl = new URL('/', request.url);
-    redirectUrl.searchParams.set('google_access_token', accessToken);
-    if (refreshToken) {
-      redirectUrl.searchParams.set('google_refresh_token', refreshToken);
-    }
+    // Store token in cookie
+    await setGoogleToken({
+      accessToken,
+      refreshToken: refreshToken || undefined,
+    });
 
-    return NextResponse.redirect(redirectUrl);
+    // Show success page with auto-redirect
+    return successPage();
+
   } catch (error: any) {
-    console.error('Token exchange error:', error?.message || error);
-    console.error('Error details:', error);
-    return NextResponse.redirect(
-      new URL(`/?google_error=${encodeURIComponent(error?.message || 'token_exchange_failed')}`, request.url)
-    );
+    console.error('[Google Callback] Token exchange error:', error?.message || error);
+    return errorPage(error?.message || 'Token exchange failed');
   }
+}
+
+function errorPage(message: string) {
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <head><title>Google Connection Error</title></head>
+    <body style="font-family: sans-serif; padding: 40px; max-width: 600px; margin: 0 auto;">
+      <h1 style="color: #e11d48;">❌ Google Connection Failed</h1>
+      <p style="font-size: 16px;"><strong>Error:</strong></p>
+      <pre style="background: #fee2e2; padding: 16px; border-radius: 8px; overflow-x: auto;">${message}</pre>
+      <p><a href="/" style="color: #3b82f6;">← Go back to illyreels</a></p>
+    </body>
+    </html>
+  `;
+  return new NextResponse(html, {
+    status: 400,
+    headers: { 'Content-Type': 'text/html' }
+  });
+}
+
+function successPage() {
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <head><title>Google Connected</title></head>
+    <body style="font-family: sans-serif; padding: 40px; max-width: 600px; margin: 0 auto; text-align: center;">
+      <h1 style="color: #10b981;">✅ Google Connected!</h1>
+      <p style="font-size: 18px;">Your Google account has been connected successfully.</p>
+      <p>Redirecting you back...</p>
+      <script>
+        setTimeout(() => { window.location.href = '/?google=connected'; }, 1500);
+      </script>
+    </body>
+    </html>
+  `;
+  return new NextResponse(html, {
+    headers: { 'Content-Type': 'text/html' }
+  });
 }
