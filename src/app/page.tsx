@@ -18,6 +18,23 @@ function getGoogleTokensFromUrl() {
   return null;
 }
 
+// Check for Meta OAuth status in URL on mount
+function getMetaStatusFromUrl() {
+  if (typeof window === 'undefined') return null;
+  const params = new URLSearchParams(window.location.search);
+  const meta = params.get('meta');
+  const metaError = params.get('meta_error');
+  // Clean URL
+  window.history.replaceState({}, '', window.location.pathname);
+  return { connected: meta === 'connected', error: metaError };
+}
+
+interface InstagramUser {
+  id: string;
+  username: string;
+  accountType: string;
+}
+
 interface Author {
   uniqueId: string;
   nickname: string;
@@ -147,11 +164,32 @@ export default function Home() {
   const [loadingSheets, setLoadingSheets] = useState(false);
   const [sheetsError, setSheetsError] = useState('');
 
+  // Instagram state (simplified - no account selection needed)
+  const [igUser, setIgUser] = useState<InstagramUser | null>(null);
+  const [metaError, setMetaError] = useState('');
+  const [loadingIgUser, setLoadingIgUser] = useState(false);
+
+  // Upload state
+  const [uploadingEntry, setUploadingEntry] = useState<string | null>(null);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadStatus, setUploadStatus] = useState('');
+
   // Check for OAuth tokens on mount
   useEffect(() => {
     const tokens = getGoogleTokensFromUrl();
     if (tokens) {
       setGoogleToken(tokens);
+    }
+
+    // Check for Meta connection status
+    const metaStatus = getMetaStatusFromUrl();
+    if (metaStatus) {
+      if (metaStatus.connected) {
+        // Fetch Instagram user info after successful connection
+        fetchInstagramUser();
+      } else if (metaStatus.error) {
+        setMetaError(metaStatus.error);
+      }
     }
   }, []);
 
@@ -378,6 +416,131 @@ export default function Home() {
     }
   }
 
+  async function connectMeta() {
+    try {
+      const res = await fetch('/api/meta/auth');
+      const data = await res.json();
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        setMetaError(data.error || 'Failed to connect to Instagram');
+      }
+    } catch (error) {
+      setMetaError('Network error — please try again');
+    }
+  }
+
+  async function fetchInstagramUser() {
+    setLoadingIgUser(true);
+
+    try {
+      const res = await fetch('/api/meta/me');
+
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || 'Failed to fetch Instagram user');
+      }
+
+      const user = await res.json();
+
+      setIgUser(user);
+      console.log('[Instagram] Connected as @' + user.username);
+    } catch (error: any) {
+      console.error('[Instagram] Failed to fetch user:', error);
+      setMetaError(error?.message || 'Failed to fetch Instagram user info');
+    } finally {
+      setLoadingIgUser(false);
+    }
+  }
+
+  async function disconnectMeta() {
+    try {
+      await fetch('/api/meta/disconnect', { method: 'POST' });
+    } catch (error) {
+      // Ignore error
+    }
+    setIgUser(null);
+  }
+
+  async function handleExportComplete(entryId: string, blob: Blob, filename: string) {
+    if (!igUser || !googleToken) {
+      // Fallback to download if not connected to Instagram
+      const url = URL.createObjectURL(blob);
+      Object.assign(document.createElement('a'), {
+        href: url,
+        download: filename,
+      }).click();
+      URL.revokeObjectURL(url);
+      return;
+    }
+
+    setUploadingEntry(entryId);
+    setUploadProgress(0);
+    setUploadStatus('Uploading to Drive...');
+
+    try {
+      // Step 1: Upload to Google Drive
+      const formData = new FormData();
+      formData.append('file', blob);
+      formData.append('accessToken', googleToken.accessToken);
+
+      setUploadProgress(20);
+      setUploadStatus('Uploading to Google Drive...');
+
+      const uploadRes = await fetch('/api/storage/upload', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!uploadRes.ok) {
+        const uploadData = await uploadRes.json();
+        throw new Error(uploadData.error || 'Failed to upload to Drive');
+      }
+
+      const uploadData = await uploadRes.json();
+      const videoUrl = uploadData.downloadUrl;
+
+      setUploadProgress(50);
+      setUploadStatus('Publishing to Instagram...');
+
+      // Step 2: Publish to Instagram
+      const entry = entries.find(e => e.id === entryId);
+      const publishRes = await fetch('/api/meta/reels/publish', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          videoUrl,
+          caption: entry?.caption || '',
+          shareToFeed: true,
+        }),
+      });
+
+      if (!publishRes.ok) {
+        const publishData = await publishRes.json();
+        throw new Error(publishData.error || 'Failed to publish to Instagram');
+      }
+
+      setUploadProgress(100);
+      setUploadStatus('✓ Uploaded to Instagram!');
+
+      // Clear status after 3 seconds
+      setTimeout(() => {
+        setUploadStatus('');
+        setUploadingEntry(null);
+        setUploadProgress(0);
+      }, 3000);
+    } catch (error: any) {
+      console.error('Upload error:', error);
+      setUploadStatus(`Error: ${error?.message || 'Upload failed'}`);
+      // Keep error visible for 3 seconds
+      setTimeout(() => {
+        setUploadStatus('');
+        setUploadingEntry(null);
+        setUploadProgress(0);
+      }, 3000);
+    }
+  }
+
   async function importFromSheets() {
     if (!googleToken || !spreadsheetId.trim()) {
       setSheetsError('Please provide a spreadsheet ID');
@@ -473,6 +636,32 @@ export default function Home() {
               Connect Google Sheets
             </button>
           )}
+          <div className="w-px h-6 bg-zinc-800 mx-1"></div>
+
+          {/* Instagram Connection */}
+          {igUser ? (
+            <>
+              <span className="text-xs text-pink-400">✓ @{igUser.username}</span>
+              <button
+                onClick={disconnectMeta}
+                className="rounded-lg border border-zinc-700 px-3 py-2 text-xs font-semibold text-zinc-400 hover:border-red-500 hover:text-red-400 transition-colors"
+              >
+                Disconnect
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={connectMeta}
+              disabled={loadingIgUser}
+              className="flex items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2 text-xs font-semibold text-zinc-300 hover:border-zinc-500 hover:bg-zinc-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/>
+              </svg>
+              {loadingIgUser ? 'Loading...' : 'Connect Instagram'}
+            </button>
+          )}
+
           <div className="w-px h-6 bg-zinc-800 mx-1"></div>
           <button
             onClick={resetEverything}
@@ -670,8 +859,8 @@ export default function Home() {
       {/* Render all canvases for fetched videos in a grid */}
       {entries.filter(e => e.data && !e.loading && !(e.data.images && e.data.images.length > 0)).length > 0 && (
         <div className="w-full max-w-[1800px] mt-8">
-          {/* Download All Button */}
-          <div className="flex justify-center mb-4">
+          {/* Download/Upload All Buttons */}
+          <div className="flex justify-center gap-3 mb-4">
             <button
               onClick={downloadAll}
               className="flex items-center gap-2 rounded-lg bg-[#fe2c55] px-6 py-3 text-sm font-semibold text-white hover:opacity-90 transition-opacity"
@@ -683,6 +872,19 @@ export default function Home() {
               </svg>
               Download All Videos
             </button>
+            {igUser && googleToken && (
+              <button
+                onClick={downloadAll}
+                className="flex items-center gap-2 rounded-lg bg-gradient-to-r from-purple-500 via-pink-500 to-orange-400 px-6 py-3 text-sm font-semibold text-white hover:opacity-90 transition-opacity"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 2v16M12 2l-4 4M12 2l4 4"/>
+                  <path d="M2 12h4M2 12l4-4M2 12l4 4"/>
+                  <path d="M22 12h-4M22 12l-4-4M22 12l4 4"/>
+                </svg>
+                Upload All to Instagram
+              </button>
+            )}
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2">
@@ -705,6 +907,7 @@ export default function Home() {
                     videoId={entry.data!.id}
                     rowNumber={rowIndex}
                     onVideoError={() => handleVideoError(entry.id)}
+                    onExportComplete={(blob, filename) => handleExportComplete(entry.id, blob, filename)}
                     brand={brandMode}
                     overlayLogoSrc={brandMode === 'forum' ? '/logoForum.png' : '/templatelogo.png'}
                     overlayDisplayName={brandMode === 'forum' ? 'Forum Market' : 'Sonotrade'}
@@ -714,6 +917,22 @@ export default function Home() {
                     tag={entry.tag}
                     marketData={entry.marketData}
                   />
+
+                  {/* Upload status for this entry */}
+                  {uploadingEntry === entry.id && (
+                    <div className="mt-3 rounded-lg border border-pink-700 bg-pink-950/20 px-3 py-2">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs font-semibold text-pink-400">{uploadStatus}</span>
+                        <span className="text-xs text-zinc-400">{uploadProgress}%</span>
+                      </div>
+                      <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-gradient-to-r from-purple-500 via-pink-500 to-orange-400 transition-all duration-300"
+                          style={{ width: `${uploadProgress}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
 
                   <button
                     onClick={() => removeRow(entry.id)}
@@ -839,7 +1058,6 @@ export default function Home() {
           </div>
         </div>
       )}
-
     </div>
   );
 }

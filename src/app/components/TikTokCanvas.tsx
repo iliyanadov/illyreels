@@ -103,6 +103,7 @@ interface Props {
   videoId?: string;
   rowNumber?: number; // Row number for ordered exports
   onVideoError?: () => void; // Callback when video fails to load
+  onExportComplete?: (blob: Blob, filename: string) => void | Promise<void>; // Callback after export
   brand?: 'sonotrade' | 'forum';
   overlayLogoSrc?: string;
   overlayChange?: string;
@@ -117,6 +118,7 @@ interface Props {
 
 export interface TikTokCanvasRef {
   startDownload: () => Promise<void>;
+  startUpload?: () => Promise<void>; // Optional upload method
 }
 
 export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCanvas({
@@ -124,6 +126,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
   videoId,
   rowNumber = 0,
   onVideoError,
+  onExportComplete,
   brand = 'sonotrade',
   overlayLogoSrc = '/templatelogo.png',
   overlayChange = '',
@@ -1835,14 +1838,21 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
 
       const blob = new Blob([buffer], { type: 'video/mp4' });
 
-      // Download
-      const url = URL.createObjectURL(blob);
       const filename = `row-${String(rowNumber + 1).padStart(2, '0')}-${videoId ?? 'export'}.mp4`;
-      Object.assign(document.createElement('a'), {
-        href: url,
-        download: filename,
-      }).click();
-      URL.revokeObjectURL(url);
+
+      // Call export callback if provided, otherwise download directly
+      if (onExportComplete) {
+        setRecStatus('Uploading...');
+        await onExportComplete(blob, filename);
+      } else {
+        // Download directly
+        const url = URL.createObjectURL(blob);
+        Object.assign(document.createElement('a'), {
+          href: url,
+          download: filename,
+        }).click();
+        URL.revokeObjectURL(url);
+      }
 
       setRecProgress(1);
     } catch (error) {
