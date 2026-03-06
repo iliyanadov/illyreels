@@ -3,6 +3,11 @@ import { clearMetaToken, removeAccount, getAllAccounts } from '@/lib/meta-token-
 
 export const runtime = 'nodejs';
 
+interface DisconnectRequestBody {
+  igUserId?: string;
+  all?: boolean;
+}
+
 /**
  * POST /api/meta/disconnect
  *
@@ -15,7 +20,7 @@ export const runtime = 'nodejs';
 export async function POST(request: NextRequest) {
   try {
     // Parse body, handling empty body case
-    let body = {};
+    let body: DisconnectRequestBody = {};
     try {
       body = await request.json();
     } catch {
@@ -23,7 +28,7 @@ export async function POST(request: NextRequest) {
       body = {};
     }
 
-    const { igUserId, all } = body;
+    const { igUserId } = body;
 
     if (igUserId) {
       // Disconnect a specific account
