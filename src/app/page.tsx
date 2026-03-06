@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
+import { upload } from '@vercel/blob/client';
 import Image from 'next/image';
 import { TikTokCanvas, TikTokCanvasRef } from './components/TikTokCanvas';
 
@@ -477,6 +478,79 @@ export default function Home() {
     }
   }
 
+  async function handleUploadToInstagram(entryId: string, blob: Blob, filename: string) {
+    const entry = entries.find(e => e.id === entryId);
+    if (!entry) return;
+
+    setUploadingEntry(entryId);
+    setUploadStatus('Uploading video...');
+    setUploadProgress(10);
+
+    try {
+      // Upload to Vercel Blob (direct from browser, bypasses Vercel serverless limits)
+      setUploadProgress(20);
+      
+      const uploadedBlob = await upload(filename, blob, {
+        access: 'public',
+        handleUploadUrl: '/api/upload',
+      });
+
+      setUploadProgress(70);
+      setUploadStatus('Publishing to Instagram...');
+
+      // Publish to Instagram using the Vercel Blob URL
+      const publishRes = await fetch('/api/meta/reels/publish', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          videoUrl: uploadedBlob.url,
+          caption: entry.caption || '',
+          shareToFeed: false,
+        }),
+      });
+
+      if (!publishRes.ok) {
+        const error = await publishRes.json();
+        throw new Error(error.error || 'Failed to publish to Instagram');
+      }
+
+      const publishData = await publishRes.json();
+      setUploadProgress(100);
+      setUploadStatus('Published successfully!');
+
+      // Update entry with published info
+      setEntries(entries => entries.map(e =>
+        e.id === entryId
+          ? { ...e, data: { ...e.data!, publishedMediaId: publishData.mediaId } }
+          : e
+      ));
+
+      // Clean up the uploaded video from Vercel Blob
+      setTimeout(async () => {
+        try {
+          await fetch(uploadedBlob.url, { method: 'DELETE' });
+        } catch (e) {
+          console.error('Failed to cleanup blob:', e);
+        }
+      }, 60000); // Delete after 1 minute
+
+      // Clear the uploading state after a delay
+      setTimeout(() => {
+        setUploadingEntry(null);
+        setUploadStatus('');
+        setUploadProgress(0);
+      }, 3000);
+
+    } catch (error: any) {
+      setUploadStatus(`Failed: ${error.message}`);
+      setTimeout(() => {
+        setUploadingEntry(null);
+        setUploadStatus('');
+        setUploadProgress(0);
+      }, 5000);
+    }
+  }
+
   async function disconnectMeta() {
     try {
       await fetch('/api/meta/disconnect', { method: 'POST' });
@@ -932,6 +1006,8 @@ export default function Home() {
                     rowNumber={rowIndex}
                     onVideoError={() => handleVideoError(entry.id)}
                     onExportComplete={(blob, filename) => handleExportComplete(entry.id, blob, filename)}
+                    onUploadToInstagram={(blob, filename) => handleUploadToInstagram(entry.id, blob, filename)}
+                    igConnected={!!igUser}
                     brand={brandMode}
                     overlayLogoSrc={brandMode === 'forum' ? '/logoForum.png' : '/templatelogo.png'}
                     overlayDisplayName={brandMode === 'forum' ? 'Forum Market' : 'Sonotrade'}

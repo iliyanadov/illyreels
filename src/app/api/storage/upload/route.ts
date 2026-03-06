@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { uploadVideo as uploadToDrive } from '@/lib/drive-storage';
+import { getGoogleToken } from '@/lib/google-token-storage';
 
 export const runtime = 'nodejs';
 
@@ -8,22 +9,24 @@ const MAX_FILE_SIZE = 1024 * 1024 * 1024;
 
 export async function POST(request: NextRequest) {
   try {
+    // Get Google token from cookie (server-side)
+    const tokenData = await getGoogleToken();
+
+    if (!tokenData) {
+      return NextResponse.json(
+        { error: 'No Google account connected. Please connect your account first.' },
+        { status: 401 }
+      );
+    }
+
     // Parse the multipart form data
     const formData = await request.formData();
     const file = formData.get('file') as File | null;
-    const accessToken = formData.get('accessToken') as string | null;
 
     if (!file) {
       return NextResponse.json(
         { error: 'No file provided' },
         { status: 400 }
-      );
-    }
-
-    if (!accessToken) {
-      return NextResponse.json(
-        { error: 'No access token provided. Please connect Google Drive first.' },
-        { status: 401 }
       );
     }
 
@@ -48,10 +51,10 @@ export async function POST(request: NextRequest) {
     // Generate a unique filename
     const timestamp = Date.now();
     const extension = file.name.split('.').pop() || 'mp4';
-    const filename = `sonoreels_${timestamp}.${extension}`;
+    const filename = `illyreels_${timestamp}.${extension}`;
 
     // Upload to Google Drive
-    const { fileId, downloadUrl } = await uploadToDrive(file, filename, accessToken);
+    const { fileId, downloadUrl } = await uploadToDrive(file, filename, tokenData.accessToken);
 
     console.log('[Storage Upload] Upload complete:', fileId);
 

@@ -3,6 +3,8 @@ import { getMetaToken, getIgUserId, getIgAccessToken } from '@/lib/meta-token-st
 
 export const runtime = 'nodejs';
 
+// Using graph.instagram.com for Instagram Login flow (not Facebook Login)
+const GRAPH_HOST = 'https://graph.instagram.com';
 const GRAPH_VERSION = process.env.META_GRAPH_VERSION || 'v22.0';
 const MAX_POLL_ATTEMPTS = 60; // ~5 minutes at 5s intervals
 const POLL_INTERVAL = 5000; // 5 seconds
@@ -19,7 +21,8 @@ interface PublishResponse {
 }
 
 /**
- * Create a media container for the Instagram Reel
+ * Step 1: Create a media container for the Instagram Reel
+ * POST https://graph.instagram.com/{api-version}/{ig-user-id}/media
  */
 async function createContainer(
   igUserId: string,
@@ -28,26 +31,29 @@ async function createContainer(
   shareToFeed: boolean,
   igAccessToken: string
 ): Promise<string> {
-  const url = new URL(`https://graph.facebook.com/${GRAPH_VERSION}/${igUserId}/media`);
+  const url = new URL(`${GRAPH_HOST}/${GRAPH_VERSION}/${igUserId}/media`);
   url.searchParams.set('media_type', 'REELS');
   url.searchParams.set('video_url', videoUrl);
-  url.searchParams.set('caption', caption);
+  if (caption) url.searchParams.set('caption', caption);
   url.searchParams.set('share_to_feed', shareToFeed ? 'true' : 'false');
   url.searchParams.set('access_token', igAccessToken);
 
-  console.log('[Reels Publish] Creating container...');
+  console.log('[Reels Publish] Step 1: Creating container...');
+  console.log('[Reels Publish] URL:', url.toString().replace(igAccessToken, 'REDACTED'));
 
   const response = await fetch(url.toString(), { method: 'POST' });
 
   if (!response.ok) {
     const error = await response.text();
+    console.error('[Reels Publish] Container creation failed:', error);
     throw new Error(`Failed to create container: ${error}`);
   }
 
   const data = await response.json();
 
   if (data.error) {
-    throw new Error(`Container creation error: ${data.error.message || data.error.type}`);
+    console.error('[Reels Publish] Container creation error:', data.error);
+    throw new Error(`Container creation error: ${data.error.message || data.error.type || JSON.stringify(data.error)}`);
   }
 
   const containerId = data.id;
@@ -57,16 +63,17 @@ async function createContainer(
 }
 
 /**
- * Poll the container status until it's FINISHED or ERROR
+ * Step 2: Poll the container status until it's FINISHED
+ * GET https://graph.instagram.com/{container-id}?fields=status_code
  */
 async function waitForContainerReady(
   containerId: string,
   igAccessToken: string
 ): Promise<void> {
-  console.log('[Reels Publish] Waiting for container to be ready...');
+  console.log('[Reels Publish] Step 2: Waiting for container to be ready...');
 
   for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt++) {
-    const url = new URL(`https://graph.facebook.com/${GRAPH_VERSION}/${containerId}`);
+    const url = new URL(`${GRAPH_HOST}/${GRAPH_VERSION}/${containerId}`);
     url.searchParams.set('fields', 'status_code,status');
     url.searchParams.set('access_token', igAccessToken);
 
@@ -80,14 +87,14 @@ async function waitForContainerReady(
     const data = await response.json();
 
     if (data.error) {
-      throw new Error(`Status check error: ${data.error.message || data.error.type}`);
+      throw new Error(`Status check error: ${data.error.message || data.error.type || JSON.stringify(data.error)}`);
     }
 
     const statusCode = data.status_code;
     console.log(`[Reels Publish] Container status: ${statusCode} (attempt ${attempt + 1}/${MAX_POLL_ATTEMPTS})`);
 
     if (statusCode === 'FINISHED') {
-      console.log('[Reels Publish] Container is ready');
+      console.log('[Reels Publish] Container is ready!');
       return;
     }
 
@@ -99,7 +106,7 @@ async function waitForContainerReady(
       throw new Error('Container has expired. Please try uploading again.');
     }
 
-    // Wait before polling again
+    // Still processing - wait before polling again
     await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL));
   }
 
@@ -107,34 +114,37 @@ async function waitForContainerReady(
 }
 
 /**
- * Publish the container to Instagram
+ * Step 3: Publish the container to Instagram
+ * POST https://graph.instagram.com/{ig-user-id}/media_publish
  */
 async function publishContainer(
   igUserId: string,
   containerId: string,
   igAccessToken: string
 ): Promise<string> {
-  const url = new URL(`https://graph.facebook.com/${GRAPH_VERSION}/${igUserId}/media_publish`);
+  const url = new URL(`${GRAPH_HOST}/${GRAPH_VERSION}/${igUserId}/media_publish`);
   url.searchParams.set('creation_id', containerId);
   url.searchParams.set('access_token', igAccessToken);
 
-  console.log('[Reels Publish] Publishing container...');
+  console.log('[Reels Publish] Step 3: Publishing container...');
 
   const response = await fetch(url.toString(), { method: 'POST' });
 
   if (!response.ok) {
     const error = await response.text();
+    console.error('[Reels Publish] Publish failed:', error);
     throw new Error(`Failed to publish: ${error}`);
   }
 
   const data = await response.json();
 
   if (data.error) {
-    throw new Error(`Publish error: ${data.error.message || data.error.type}`);
+    console.error('[Reels Publish] Publish error:', data.error);
+    throw new Error(`Publish error: ${data.error.message || data.error.type || JSON.stringify(data.error)}`);
   }
 
   const mediaId = data.id;
-  console.log('[Reels Publish] Published successfully, media ID:', mediaId);
+  console.log('[Reels Publish] Published successfully! Media ID:', mediaId);
 
   return mediaId;
 }
@@ -166,7 +176,7 @@ export async function POST(request: NextRequest) {
     console.log('[Reels Publish] Starting publish workflow...');
     console.log('[Reels Publish] IG User ID:', igUserId);
     console.log('[Reels Publish] Video URL:', videoUrl);
-    console.log('[Reels Publish] Caption:', caption.substring(0, 50) + '...');
+    console.log('[Reels Publish] Caption:', caption.substring(0, 50) + (caption.length > 50 ? '...' : ''));
     console.log('[Reels Publish] Share to feed:', shareToFeed);
 
     // Step 1: Create container
@@ -194,7 +204,7 @@ export async function POST(request: NextRequest) {
     console.error('[Reels Publish] Error:', error?.message || error);
 
     // Check for authentication errors
-    if (error?.message?.includes('token') || error?.message?.includes('authentication') || error?.message?.includes('OAuth')) {
+    if (error?.message?.includes('token') || error?.message?.includes('authentication') || error?.message?.includes('OAuth') || error?.message?.includes('access token')) {
       return NextResponse.json(
         { error: 'Authentication failed. Please reconnect your Instagram account.' },
         { status: 401 }
