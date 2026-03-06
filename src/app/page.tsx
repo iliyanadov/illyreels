@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from 'react';
 import { upload } from '@vercel/blob/client';
 import Image from 'next/image';
 import { TikTokCanvas, TikTokCanvasRef } from './components/TikTokCanvas';
+import { PublishingLimit } from './components/PublishingLimit';
 
 // Check for Google OAuth tokens in URL on mount
 
@@ -525,14 +526,6 @@ export default function Home() {
           : e
       ));
 
-      // Clean up the uploaded video from Vercel Blob
-      setTimeout(async () => {
-        try {
-          await fetch(uploadedBlob.url, { method: 'DELETE' });
-        } catch (e) {
-          console.error('Failed to cleanup blob:', e);
-        }
-      }, 60000); // Delete after 1 minute
 
       // Clear the uploading state after a delay
       setTimeout(() => {
@@ -761,6 +754,9 @@ export default function Home() {
           )}
 
           <div className="w-px h-6 bg-zinc-800 mx-1"></div>
+          
+          {/* Publishing Limit */}
+          {igUser && <PublishingLimit />}
           <button
             onClick={resetEverything}
             className="rounded-lg border border-orange-700 bg-orange-950/20 px-4 py-2 text-xs font-semibold text-orange-400 hover:bg-orange-950/40 hover:border-orange-600 transition-colors"
