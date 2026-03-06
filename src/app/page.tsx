@@ -109,6 +109,7 @@ interface VideoEntry {
   videoFailed: boolean; // Track if video failed to load in canvas
   instagramPermalink?: string; // Instagram URL after successful publish
   sheetRow?: number; // The actual spreadsheet row number (for display and updating)
+  uploadError?: string; // Persistent upload error message (until dismissed)
 }
 
 function formatBytes(bytes: number): string {
@@ -679,6 +680,13 @@ export default function Home() {
     const entry = entries.find(e => e.id === entryId);
     if (!entry) return;
 
+    // Clear any previous error when starting a new upload
+    setEntries(entries => entries.map(e =>
+      e.id === entryId
+        ? { ...e, uploadError: undefined }
+        : e
+    ));
+
     setUploadingEntry(entryId);
     setUploadStatus('Uploading video...');
     setUploadProgress(10);
@@ -750,21 +758,34 @@ export default function Home() {
         }
       }
 
-      // Clear the uploading state after a delay
+      // Clear uploading state (but keep the success message briefly)
       setTimeout(() => {
         setUploadingEntry(null);
-        setUploadStatus('');
         setUploadProgress(0);
-      }, 3000);
+      }, 2000);
 
     } catch (error: any) {
-      setUploadStatus(`Failed: ${error.message}`);
-      setTimeout(() => {
-        setUploadingEntry(null);
-        setUploadStatus('');
-        setUploadProgress(0);
-      }, 5000);
+      // Store error persistently in the entry
+      const errorMessage = error.message || 'Unknown error';
+      setEntries(entries => entries.map(e =>
+        e.id === entryId
+          ? { ...e, uploadError: errorMessage }
+          : e
+      ));
+
+      // Clear uploading state but keep the error
+      setUploadingEntry(null);
+      setUploadProgress(0);
+      setUploadStatus('');
     }
+  }
+
+  function dismissEntryError(entryId: string) {
+    setEntries(entries => entries.map(e =>
+      e.id === entryId
+        ? { ...e, uploadError: undefined }
+        : e
+    ));
   }
 
   async function handleUploadToInstagram(entryId: string, blob: Blob, filename: string) {
@@ -1492,6 +1513,38 @@ export default function Home() {
                           className="h-full bg-gradient-to-r from-purple-500 via-pink-500 to-orange-400 transition-all duration-300"
                           style={{ width: `${uploadProgress}%` }}
                         />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Persistent upload error with dismiss button */}
+                  {entry.uploadError && (
+                    <div className="mt-3 rounded-lg border border-red-700 bg-red-950/20 px-3 py-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-start gap-2 flex-1">
+                          <svg className="text-red-400 mt-0.5 flex-shrink-0" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <circle cx="12" cy="12" r="10"/>
+                            <line x1="12" y1="8" x2="12" y2="12"/>
+                            <line x1="12" y1="16" x2="12.01" y2="16"/>
+                          </svg>
+                          <div className="flex-1">
+                            <p className="text-xs font-semibold text-red-400">Upload Failed</p>
+                            <p className="text-xs text-red-300 mt-1">{entry.uploadError}</p>
+                            {entry.uploadError.toLowerCase().includes('auth') && (
+                              <p className="text-xs text-zinc-400 mt-1">Please reconnect your Instagram account and try again.</p>
+                            )}
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => dismissEntryError(entry.id)}
+                          className="flex-shrink-0 text-zinc-500 hover:text-zinc-300 transition-colors"
+                          title="Dismiss error"
+                        >
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <line x1="18" y1="6" x2="6" y2="18"/>
+                            <line x1="6" y1="6" x2="18" y2="18"/>
+                          </svg>
+                        </button>
                       </div>
                     </div>
                   )}
