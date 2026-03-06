@@ -4,8 +4,8 @@ import { cookies } from 'next/headers';
 
 export interface StoredAccount {
   userAccessToken: string;
-  igUserId: string;
-  igUsername: string;
+  igUserId?: string;
+  igUsername?: string;
   expiresAt: number;
 }
 
