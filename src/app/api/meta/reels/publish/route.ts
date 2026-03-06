@@ -18,6 +18,7 @@ interface PublishRequest {
 interface PublishResponse {
   containerId: string;
   mediaId: string;
+  permalink?: string;
 }
 
 /**
@@ -149,6 +150,32 @@ async function publishContainer(
   return mediaId;
 }
 
+/**
+ * Step 4: Get the permalink for the published media
+ * GET https://graph.instagram.com/{api-version}/{media-id}?fields=permalink&access_token={access-token}
+ */
+async function getPermalink(mediaId: string, igAccessToken: string): Promise<string | null> {
+  const url = new URL(`${GRAPH_HOST}/${GRAPH_VERSION}/${mediaId}`);
+  url.searchParams.set('fields', 'permalink');
+  url.searchParams.set('access_token', igAccessToken);
+
+  console.log('[Reels Publish] Step 4: Fetching permalink...');
+
+  const response = await fetch(url.toString());
+
+  if (!response.ok) {
+    const error = await response.text();
+    console.error('[Reels Publish] Permalink fetch failed:', error);
+    return null;
+  }
+
+  const data = await response.json();
+  const permalink = data.permalink;
+  console.log('[Reels Publish] Permalink:', permalink);
+
+  return permalink || null;
+}
+
 export async function POST(request: NextRequest) {
   try {
     // Get the stored Instagram user access token
@@ -194,9 +221,13 @@ export async function POST(request: NextRequest) {
     // Step 3: Publish the reel
     const mediaId = await publishContainer(igUserId, containerId, igAccessToken);
 
+    // Step 4: Get the permalink
+    const permalink = await getPermalink(mediaId, igAccessToken);
+
     const result: PublishResponse = {
       containerId,
       mediaId,
+      permalink: permalink ?? undefined,
     };
 
     return NextResponse.json(result);
