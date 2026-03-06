@@ -142,8 +142,8 @@ export default function Home() {
   // Store refs for each canvas to trigger downloads
   const canvasRefsMap = useRef<Map<string, TikTokCanvasRef>>(new Map());
 
-  // Brand toggle: 'sonotrade' | 'forum'
-  const [brandMode, setBrandMode] = useState<'sonotrade' | 'forum'>('sonotrade');
+  // Brand toggle: 'sonotrade' | 'forum' | 'culturesparadox'
+  const [brandMode, setBrandMode] = useState<'sonotrade' | 'forum' | 'culturesparadox'>('sonotrade');
 
   // Google Sheets state
   const [googleToken, setGoogleToken] = useState<{ accessToken: string; refreshToken?: string } | null>(null);
@@ -965,6 +965,16 @@ export default function Home() {
               Sonotrade
             </button>
             <button
+              onClick={() => setBrandMode('culturesparadox')}
+              className={`rounded-md px-3 py-1 text-xs font-semibold transition-colors ${
+                brandMode === 'culturesparadox'
+                  ? 'bg-purple-600 text-white'
+                  : 'text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              Cultures Paradox
+            </button>
+            <button
               onClick={() => setBrandMode('forum')}
               className={`flex items-center gap-1.5 rounded-md px-3 py-1 text-xs font-semibold transition-colors ${
                 brandMode === 'forum'
@@ -1210,9 +1220,21 @@ export default function Home() {
                     onUploadToInstagram={(blob, filename) => handleUploadToInstagram(entry.id, blob, filename)}
                     igConnected={!!igUser}
                     brand={brandMode}
-                    overlayLogoSrc={brandMode === 'forum' ? '/logoForum.png' : '/templatelogo.png'}
-                    overlayDisplayName={brandMode === 'forum' ? 'Forum Market' : 'Sonotrade'}
-                    overlayHandle={brandMode === 'forum' ? '@ForumDotMarket' : '@SonotradeHQ'}
+                    overlayLogoSrc={
+                      brandMode === 'forum' ? '/logoForum.png' :
+                      brandMode === 'culturesparadox' ? '/culturesparadox.png' :
+                      '/templatelogo.png'
+                    }
+                    overlayDisplayName={
+                      brandMode === 'forum' ? 'Forum Market' :
+                      brandMode === 'culturesparadox' ? 'Cultures Paradox' :
+                      'Sonotrade'
+                    }
+                    overlayHandle={
+                      brandMode === 'forum' ? '@ForumDotMarket' :
+                      brandMode === 'culturesparadox' ? '@culturesparadox' :
+                      '@SonotradeHQ'
+                    }
                     overlayChange={entry.change}
                     overlayCaption={entry.caption}
                     tag={entry.tag}

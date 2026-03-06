@@ -106,7 +106,7 @@ interface Props {
   onExportComplete?: (blob: Blob, filename: string) => void | Promise<void>; // Callback after export
   onUploadToInstagram?: (blob: Blob, filename: string) => void | Promise<void>; // Callback to upload to Instagram
   igConnected?: boolean; // Whether Instagram is connected
-  brand?: 'sonotrade' | 'forum';
+  brand?: 'sonotrade' | 'forum' | 'culturesparadox';
   overlayLogoSrc?: string;
   overlayChange?: string;
   overlayDisplayName?: string;
@@ -156,6 +156,8 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
   const marketImgRef = useRef<HTMLImageElement | null>(null);
   // Track if market image has been loaded
   const marketImgLoadedRef = useRef(false);
+  // Cached image for the DuelRocket banner
+  const duelrocketImgRef = useRef<HTMLImageElement | null>(null);
 
   // Pan offset for the underlying video (dragging moves the video, not the crop box)
   const videoOffsetRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -835,6 +837,33 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     }
   }
 
+  function drawDuelrocketBannerOnContext({ ctx, boxY }: { ctx: CanvasRenderingContext2D; boxY: number }): void {
+    // DuelRocket banner: 720px width, height scaled from 1920x1027 native
+    const targetWidth = 720;
+    const boxX = (CANVAS_W - targetWidth) / 2; // Center horizontally
+
+    // Load DuelRocket image if not cached
+    let banner = duelrocketImgRef.current;
+    if (!banner) {
+      banner = new Image();
+      banner.src = '/duelrocket.png';
+      duelrocketImgRef.current = banner;
+    }
+
+    // Draw the banner image scaled to 720px width while preserving aspect ratio
+    if (banner.complete && banner.width && banner.height) {
+      const scaleX = targetWidth / banner.width;
+      const drawH = banner.height * scaleX;
+      const drawY = boxY;
+
+      ctx.drawImage(banner, boxX, drawY, targetWidth, drawH);
+    } else {
+      // Fallback: purple background while loading
+      ctx.fillStyle = '#6b21a8';
+      ctx.fillRect(boxX, boxY, targetWidth, 385); // ~385 = 1027 * (720/1920)
+    }
+  }
+
   // ── Draw loop (black bg + global header + cropped video) ─────────────────────
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -884,6 +913,9 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
         // Draw brand element below the video
         if (brand === 'forum') {
           drawForumBannerOnContext({ ctx, boxY: y + h + 30 });
+        } else if (brand === 'culturesparadox' && tag?.toLowerCase() === 'duelrocket') {
+          // Overlap video by 15px (move banner up)
+          drawDuelrocketBannerOnContext({ ctx, boxY: y + h - 15 });
         } else {
           drawMarketCardOnContext({ ctx, boxY: y + h + 30 });
         }
@@ -891,7 +923,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     }
     draw();
     return () => { active = false; cancelAnimationFrame(raf.current); };
-  }, [videoSrc, overlayDisplayName, overlayHandle, overlayDate, overlayVerified, overlayCaption, videoScale, marketData, brand, overlayChange]);
+  }, [videoSrc, overlayDisplayName, overlayHandle, overlayDate, overlayVerified, overlayCaption, videoScale, marketData, brand, overlayChange, tag]);
 
   // ── Pinch-to-zoom (wheel/trackpad + touch gestures) ──────────────────────────
   useEffect(() => {
@@ -1102,9 +1134,11 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     const oldY = currentBox.y;
     const cropBoxHeight = currentBox.h;
 
-    // Market box height (if present)
+    // Market box / banner height (if present)
     const hasMarketBox = tag?.trim() && marketData && marketData.markets && marketData.markets.length > 0;
-    const marketBoxHeight = hasMarketBox ? 140 + 30 : 0; // 140 box height + 30px gap
+    const hasDuelrocketBanner = brand === 'culturesparadox' && tag?.toLowerCase() === 'duelrocket';
+    // DuelRocket: 385px height (1027 * 720/1920) minus 15px overlap = 370px effective
+    const marketBoxHeight = hasMarketBox ? 140 + 30 : hasDuelrocketBanner ? 385 - 15 : 0;
 
     // Total content height
     const totalHeight = headerHeight + cropBoxHeight + marketBoxHeight;
@@ -1796,6 +1830,9 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
         if (brand === 'forum') {
           // @ts-ignore - OffscreenCanvasRenderingContext2D is compatible for our use
           drawForumBannerOnContext({ ctx: offscreenCtx, boxY: box.y + box.h + 30 });
+        } else if (brand === 'culturesparadox' && tag?.toLowerCase() === 'duelrocket') {
+          // @ts-ignore - OffscreenCanvasRenderingContext2D is compatible for our use
+          drawDuelrocketBannerOnContext({ ctx: offscreenCtx, boxY: box.y + box.h - 15 });
         } else {
           // @ts-ignore - OffscreenCanvasRenderingContext2D is compatible for our use
           drawMarketCardOnContext({ ctx: offscreenCtx, boxY: box.y + box.h + 30 });
