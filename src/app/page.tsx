@@ -740,9 +740,17 @@ export default function Home() {
       ));
 
       // Update Google Sheet status to "published" if we have the row number
+      console.log('[Sheets] Checking conditions for sheet update:', {
+        sheetRow: entry.sheetRow,
+        hasGoogleToken: !!googleToken,
+        spreadsheetId,
+        sheetName
+      });
+
       if (entry.sheetRow !== undefined && googleToken && spreadsheetId && sheetName) {
         try {
-          await fetch('/api/google/sheets/update', {
+          setUploadStatus('Updating spreadsheet...');
+          const updateRes = await fetch('/api/google/sheets/update', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -752,9 +760,33 @@ export default function Home() {
               status: 'published'
             }),
           });
-          console.log('[Sheets] Updated row', entry.sheetRow, 'to "published"');
+
+          if (!updateRes.ok) {
+            const updateError = await updateRes.json();
+            console.error('[Sheets] API error:', updateError);
+          } else {
+            console.log('[Sheets] ✅ Updated row', entry.sheetRow, 'to "published"');
+          }
         } catch (error) {
           console.error('[Sheets] Failed to update sheet status:', error);
+        }
+      } else {
+        console.log('[Sheets] ⏭️ Skipped sheet update - missing conditions');
+      }
+
+      // Delete the Vercel Blob after successful Instagram upload to free up storage
+      if (uploadedBlob.url) {
+        try {
+          console.log('[Blob Delete] Cleaning up blob:', uploadedBlob.url);
+          await fetch('/api/storage/delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: uploadedBlob.url }),
+          });
+          console.log('[Blob Delete] ✅ Blob cleaned up successfully');
+        } catch (error) {
+          console.error('[Blob Delete] Failed to clean up blob:', error);
+          // Don't fail the upload if blob deletion fails
         }
       }
 
