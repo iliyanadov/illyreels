@@ -288,7 +288,7 @@ export async function getIgUsername(): Promise<string | null> {
  * Get all connected accounts (without access tokens)
  * Returns array for the account switcher UI
  */
-export async function getAllAccounts(): Promise<Array<{ igUserId: string; igUsername: string; isActive: boolean }>> {
+export async function getAllAccounts(): Promise<Array<{ igUserId: string | undefined; igUsername: string | undefined; isActive: boolean }>> {
   const data = await getRawTokenData();
 
   if (!data || data.accounts.length === 0) {
