@@ -574,6 +574,15 @@ export default function Home() {
   }
 
   async function connectGoogle() {
+    // Clear any existing token to force fresh OAuth flow with new scope
+    try {
+      await fetch('/api/google/me', { method: 'DELETE' });
+      setGoogleToken(null);
+      console.log('[Google] Cleared old token before re-auth');
+    } catch (e) {
+      console.log('[Google] No existing token to clear:', e);
+    }
+
     // Get OAuth URL from our API
     const res = await fetch('/api/google/auth');
     const data = await res.json();

@@ -28,8 +28,6 @@ export async function POST(request: NextRequest) {
     const range = `${encodeURIComponent(sheetName)}!E${rowNumber}`;
     const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}?valueInputOption=USER_ENTERED`;
 
-    console.log('[Google Sheets Update] Updating row', rowNumber, 'to status:', status);
-
     const response = await fetch(url, {
       method: 'PUT',
       headers: {

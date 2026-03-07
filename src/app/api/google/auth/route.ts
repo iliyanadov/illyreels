@@ -10,8 +10,8 @@ const oauth2Client = new google.auth.OAuth2(
   process.env.GOOGLE_REDIRECT_URI || `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/google/callback`
 );
 
-// Scopes for Google Sheets access
-const SCOPES = ['https://www.googleapis.com/auth/spreadsheets.readonly'];
+// Scopes for Google Sheets access (read/write to update status)
+const SCOPES = ['https://www.googleapis.com/auth/spreadsheets'];
 
 export async function GET(request: NextRequest) {
   try {
