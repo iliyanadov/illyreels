@@ -758,7 +758,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
 
         // Draw "Exclusive access in bio" below the banner
         ctx.font = '400 17px system-ui, sans-serif';
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.5)'; // White at 50% opacity
+        ctx.fillStyle = 'rgba(255, 255, 255, 1)'; // White at 100% opacity
         ctx.textAlign = 'center';
         const textX = bannerX + bannerWidth / 2; // Center text under banner
         const textY = bannerY + bannerHeight + textGap + 10;
