@@ -101,10 +101,13 @@ interface MarketData {
 interface Props {
   videoSrc: string;
   videoId?: string;
+  entryId?: string; // Unique entry ID for queue tracking
   rowNumber?: number; // Row number for ordered exports
+  queuePosition?: number; // Position in upload queue (undefined = not queued)
   onVideoError?: () => void; // Callback when video fails to load
   onExportComplete?: (blob: Blob, filename: string) => void | Promise<void>; // Callback after export
-  onUploadToInstagram?: (blob: Blob, filename: string) => void | Promise<void>; // Callback to upload to Instagram
+  onUploadToInstagram?: (blob: Blob, filename: string) => void | Promise<void>; // Callback to upload to Instagram (called after render)
+  onUploadRequest?: (entryId: string) => void; // Callback when upload button is clicked (before render)
   igConnected?: boolean; // Whether Instagram is connected
   brand?: 'sonotrade' | 'forum' | 'culturesparadox';
   overlayLogoSrc?: string;
@@ -126,10 +129,13 @@ export interface TikTokCanvasRef {
 export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCanvas({
   videoSrc,
   videoId,
+  entryId,
   rowNumber = 0,
+  queuePosition,
   onVideoError,
   onExportComplete,
   onUploadToInstagram,
+  onUploadRequest,
   igConnected = false,
   brand = 'sonotrade',
   overlayLogoSrc = '/templatelogo.png',
@@ -203,12 +209,18 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
       return Promise.resolve();
     },
     startUpload: () => {
+      console.log('[TikTokCanvas] startUpload called for entry:', entryId, 'isRecording:', isRecording);
       if (!isRecording) {
+        // Set upload mode BEFORE starting recording (using ref for immediate availability)
         isUploadModeRef.current = true;
         setIsUploadMode(true);
+        console.log('[TikTokCanvas] Starting upload recording for entry:', entryId);
         return startRecording();
+      } else {
+        console.error('[TikTokCanvas] Already recording, cannot start upload - THIS IS A BUG');
+        // Return a rejected promise so the queue knows something went wrong
+        return Promise.reject(new Error('Cannot start upload - already recording'));
       }
-      return Promise.resolve();
     }
   }));
 
@@ -1892,7 +1904,10 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
       const filename = `row-${String(rowNumber + 1).padStart(2, '0')}-${videoId ?? 'export'}.mp4`;
 
       // Call the appropriate callback based on upload mode
-      if ((isUploadMode || isUploadModeRef.current) && onUploadToInstagram) {
+      const shouldUpload = isUploadMode || isUploadModeRef.current;
+      console.log('[startRecording] Upload check - isUploadMode:', isUploadMode, 'isUploadModeRef.current:', isUploadModeRef.current, 'shouldUpload:', shouldUpload, 'has onUploadToInstagram:', !!onUploadToInstagram);
+
+      if (shouldUpload && onUploadToInstagram) {
         setRecStatus('Preparing for upload...');
         await onUploadToInstagram(blob, filename);
         setIsUploadMode(false);
@@ -2163,6 +2178,19 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
         </div>
       )}
 
+      {/* Queued status indicator */}
+      {!isRecording && queuePosition !== undefined && (
+        <div className="w-[270px] rounded-lg bg-zinc-800/50 px-3 py-2">
+          <div className="flex items-center gap-2 text-xs text-zinc-400">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="animate-pulse">
+              <circle cx="12" cy="12" r="10"/>
+              <polyline points="12 6 12 12 16 14"/>
+            </svg>
+            <span>Queued ({queuePosition} in line)...</span>
+          </div>
+        </div>
+      )}
+
       {/* Export button */}
       {!isRecording && !isUploadMode && (
         <button
@@ -2181,9 +2209,10 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
       {!isRecording && !isUploadMode && igConnected && (
         <button
           onClick={() => {
-            isUploadModeRef.current = true;
-            setIsUploadMode(true);
-            startRecording();
+            // Call parent to add to queue (rendering will happen when it's our turn)
+            if (onUploadRequest) {
+              onUploadRequest(entryId ?? videoId ?? 'unknown');
+            }
           }}
           className="flex items-center gap-2 rounded-lg bg-gradient-to-r from-purple-500 via-pink-500 to-orange-400 px-5 py-2.5 text-xs font-semibold text-white hover:opacity-90 transition-opacity"
         >

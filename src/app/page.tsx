@@ -110,6 +110,7 @@ interface VideoEntry {
   instagramPermalink?: string; // Instagram URL after successful publish
   sheetRow?: number; // The actual spreadsheet row number (for display and updating)
   uploadError?: string; // Persistent upload error message (until dismissed)
+  queuePosition?: number; // Position in upload queue (0 = currently processing, undefined = not in queue)
 }
 
 function formatBytes(bytes: number): string {
@@ -182,8 +183,8 @@ export default function Home() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadStatus, setUploadStatus] = useState('');
 
-  // Instagram upload queue (ensures only one upload at a time)
-  const uploadQueueRef = useRef<Array<{ entryId: string; blob: Blob; filename: string }>>([]);
+  // Instagram upload queue (ensures only one render+upload at a time)
+  const uploadQueueRef = useRef<Array<string>>([]);
   const isProcessingUploadRef = useRef(false);
 
   // Bulk upload to Instagram state
@@ -666,23 +667,63 @@ export default function Home() {
     }
   }
 
-  // Process the upload queue (one upload at a time)
+  // Process the upload queue (one render+upload at a time)
   async function processUploadQueue() {
     if (isProcessingUploadRef.current || uploadQueueRef.current.length === 0) {
+      console.log('[Queue] processUploadQueue skipped - isProcessing:', isProcessingUploadRef.current, 'queueLength:', uploadQueueRef.current.length);
       return;
     }
 
     isProcessingUploadRef.current = true;
-    const { entryId, blob, filename } = uploadQueueRef.current.shift()!;
+    const entryId = uploadQueueRef.current.shift()!;
+    console.log('[Queue] Processing entry:', entryId, 'remaining:', uploadQueueRef.current.length);
 
-    await processSingleUpload(entryId, blob, filename);
+    // Update queue positions for remaining items
+    updateQueuePositions();
+
+    // Trigger the canvas to start rendering (which will then call upload)
+    const canvasRef = canvasRefsMap.current.get(entryId);
+    try {
+      if (canvasRef?.startUpload) {
+        console.log('[Queue] Calling startUpload on canvas for entry:', entryId);
+        await canvasRef.startUpload();
+        console.log('[Queue] startUpload completed for entry:', entryId);
+      } else {
+        console.error('[Queue] No canvas ref found for entry:', entryId, 'available refs:', Array.from(canvasRefsMap.current.keys()));
+      }
+    } catch (error) {
+      console.error('[Queue] Error processing entry:', entryId, error);
+      // Store error on entry
+      setEntries(entries => entries.map(e =>
+        e.id === entryId
+          ? { ...e, uploadError: error instanceof Error ? error.message : 'Unknown error' }
+          : e
+      ));
+    }
+
+    isProcessingUploadRef.current = false;
 
     // Process next in queue if any
     if (uploadQueueRef.current.length > 0) {
+      console.log('[Queue] Queue has more items, processing next in 500ms');
       setTimeout(() => processUploadQueue(), 500);
     } else {
-      isProcessingUploadRef.current = false;
+      console.log('[Queue] Queue empty, done processing');
     }
+  }
+
+  // Update queue positions for display
+  function updateQueuePositions() {
+    setEntries(entries => entries.map(e => {
+      const queueIndex = uploadQueueRef.current.indexOf(e.id);
+      if (queueIndex !== -1) {
+        return { ...e, queuePosition: queueIndex + 1 };
+      } else if (e.id === uploadingEntry) {
+        return { ...e, queuePosition: 0 }; // Currently processing
+      } else {
+        return { ...e, queuePosition: undefined };
+      }
+    }));
   }
 
   async function processSingleUpload(entryId: string, blob: Blob, filename: string) {
@@ -829,11 +870,17 @@ export default function Home() {
     ));
   }
 
-  async function handleUploadToInstagram(entryId: string, blob: Blob, filename: string) {
+  // Called when user clicks "Upload Reel" - adds to queue BEFORE rendering
+  function handleUploadRequest(entryId: string) {
+    console.log('[Queue] handleUploadRequest called for entry:', entryId);
     // Add to queue
-    uploadQueueRef.current.push({ entryId, blob, filename });
+    uploadQueueRef.current.push(entryId);
+    console.log('[Queue] Queue now has:', uploadQueueRef.current.length, 'items');
 
-    // Show queued status if there are items waiting
+    // Update queue positions
+    updateQueuePositions();
+
+    // Show queued status if already processing
     if (isProcessingUploadRef.current) {
       const queuePosition = uploadQueueRef.current.length;
       setUploadStatus(`Queued (${queuePosition} in line)...`);
@@ -841,8 +888,22 @@ export default function Home() {
 
     // Start processing if not already processing
     if (!isProcessingUploadRef.current) {
+      console.log('[Queue] Starting queue processing');
       processUploadQueue();
     }
+  }
+
+  // Called by TikTokCanvas AFTER rendering completes - uploads the blob
+  async function handleUploadToInstagram(entryId: string, blob: Blob, filename: string) {
+    console.log('[Queue] handleUploadToInstagram called for entry:', entryId, 'blob size:', blob.size);
+    // Clear queue position for this entry
+    setEntries(entries => entries.map(e =>
+      e.id === entryId ? { ...e, queuePosition: undefined } : e
+    ));
+
+    // Upload the already-rendered video
+    await processSingleUpload(entryId, blob, filename);
+    console.log('[Queue] handleUploadToInstagram completed for entry:', entryId);
   }
 
   async function disconnectMeta(igUserId?: string) {
@@ -1515,10 +1576,13 @@ export default function Home() {
                     }}
                     videoSrc={proxyStreamUrl(entry.data!.play || entry.data!.hdplay || entry.data!.wmplay)}
                     videoId={entry.data!.id}
+                    entryId={entry.id}
                     rowNumber={entry.sheetRow !== undefined ? entry.sheetRow - 1 : 0}
+                    queuePosition={entry.queuePosition}
                     onVideoError={() => handleVideoError(entry.id)}
                     onExportComplete={(blob, filename) => handleExportComplete(entry.id, blob, filename)}
                     onUploadToInstagram={(blob, filename) => handleUploadToInstagram(entry.id, blob, filename)}
+                    onUploadRequest={() => handleUploadRequest(entry.id)}
                     igConnected={!!igUser}
                     brand={brandMode}
                     overlayLogoSrc={
