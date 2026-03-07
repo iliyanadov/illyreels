@@ -234,8 +234,28 @@ export async function POST(request: NextRequest) {
   } catch (error: any) {
     console.error('[Reels Publish] Error:', error?.message || error);
 
-    // Check for authentication errors
-    if (error?.message?.includes('token') || error?.message?.includes('authentication') || error?.message?.includes('OAuth') || error?.message?.includes('access token')) {
+    const errorMessage = error?.message || error?.toString() || '';
+
+    // Check for rate limit/quota errors FIRST (before checking for auth errors)
+    if (errorMessage.toLowerCase().includes('rate limit') ||
+        errorMessage.toLowerCase().includes('quota') ||
+        errorMessage.toLowerCase().includes('limit exceeded') ||
+        errorMessage.includes('Application request limit') ||
+        errorMessage.includes('#4') || // Rate limit error code
+        errorMessage.includes('2001') || // App rate limit error code for Instagram
+        errorMessage.includes('feed_application_block')) { // Rate limit blocking
+      return NextResponse.json(
+        { error: 'You have reached Instagram\'s daily upload limit (50 reels per 24 hours). Please wait before uploading more.' },
+        { status: 429 }
+      );
+    }
+
+    // Check for authentication errors (more specific check)
+    if (errorMessage.includes('Invalid OAuth') ||
+        errorMessage.includes('190') || // OAuth error code
+        errorMessage.includes('Invalid access token') ||
+        errorMessage.includes('Not authorized') ||
+        errorMessage.includes('Authentication required')) {
       return NextResponse.json(
         { error: 'Authentication failed. Please reconnect your Instagram account.' },
         { status: 401 }
