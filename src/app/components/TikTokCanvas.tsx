@@ -623,6 +623,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     ctx.textAlign = 'left'; // Ensure left alignment for title
 
     const fullText = marketData.title;
+    console.log('[Market Card] Drawing title:', JSON.stringify(fullText));
     const fullTextWidth = ctx.measureText(fullText).width;
     const ellipsis = '...';
     const ellipsisWidth = ctx.measureText(ellipsis).width;
@@ -637,47 +638,48 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
       const totalTextHeight = lineHeight * 2; // Two lines
       const textY = boxY + (boxHeight - totalTextHeight) / 2 + 24; // Center the two-line block
       const words = fullText.split(' ');
-      let line1 = '';
-      let line2 = '';
 
+      // Build line 1 first - add words until full
+      let line1Words: string[] = [];
+      let line1Width = 0;
       for (const word of words) {
-        // Try adding to line 1
-        const testLine1 = line1 + (line1 ? ' ' : '') + word;
-        const line1Width = ctx.measureText(testLine1).width;
+        const wordWidth = ctx.measureText(word).width;
+        const spaceWidth = line1Words.length > 0 ? ctx.measureText(' ').width : 0;
+        const newWidth = line1Width + spaceWidth + wordWidth;
 
-        if (line1Width <= maxTextWidth) {
-          line1 = testLine1;
+        if (newWidth <= maxTextWidth) {
+          line1Words.push(word);
+          line1Width = newWidth;
         } else {
-          // Line 1 is full, add to line 2
-          const testLine2 = line2 + (line2 ? ' ' : '') + word;
-          const line2Width = ctx.measureText(testLine2).width;
-
-          if (line2Width <= maxTextWidth - ellipsisWidth) {
-            line2 = testLine2;
-          } else {
-            // Line 2 is also full - truncate with ellipsis
-            break;
-          }
+          break; // Line 1 is full
         }
       }
 
-      // Draw the lines (line2 may have ellipsis)
-      ctx.fillText(line1, textStartX, textY);
+      // Remaining words go to line 2
+      const line2Words = words.slice(line1Words.length);
+
+      // Build the final line strings
+      let line1 = line1Words.join(' ');
+      let line2 = line2Words.join(' ');
+
+      // Truncate line 2 if needed (with ellipsis)
       if (line2) {
-        ctx.fillText(line2, textStartX, textY + 34);
-      } else {
-        // Only one line, add ellipsis if truncated
-        const truncatedWidth = ctx.measureText(line1).width;
-        if (truncatedWidth > maxTextWidth - ellipsisWidth) {
-          // Truncate line1 and add ellipsis
-          let truncatedLine = line1;
+        const line2Width = ctx.measureText(line2).width;
+        if (line2Width > maxTextWidth - ellipsisWidth) {
+          let truncatedLine = line2;
           while (ctx.measureText(truncatedLine + ellipsis).width > maxTextWidth) {
             truncatedLine = truncatedLine.slice(0, -1);
           }
-          ctx.fillText(truncatedLine + ellipsis, textStartX, textY);
-        } else {
-          ctx.fillText(line1, textStartX, textY);
+          line2 = truncatedLine + ellipsis;
         }
+      }
+
+      // Draw the lines
+      console.log('[Market Card] Drawing line1:', JSON.stringify(line1), 'line2:', JSON.stringify(line2));
+      console.log('[Market Card] line1Words:', line1Words, 'line2Words:', line2Words);
+      ctx.fillText(line1, textStartX, textY);
+      if (line2) {
+        ctx.fillText(line2, textStartX, textY + 34);
       }
     }
 
