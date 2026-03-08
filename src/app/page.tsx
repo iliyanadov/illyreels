@@ -136,6 +136,7 @@ function formatDuration(seconds: number): string {
 // Tag to Event ID mapping
 const TAG_TO_EVENT_ID: Record<string, string> = {
   'film': 'KXENGAGEMENTTIMOTHEEKYLIE-26',
+  'kanye': 'KXSPOTIFYALBUMRELEASEDATEKANYE-MAR21',
 };
 
 export default function Home() {
