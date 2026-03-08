@@ -164,6 +164,8 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
   const marketImgLoadedRef = useRef(false);
   // Cached image for the DuelRocket banner
   const duelrocketImgRef = useRef<HTMLImageElement | null>(null);
+  // Cached image for the kanye custom card
+  const kanyeImgRef = useRef<HTMLImageElement | null>(null);
 
   // Pan offset for the underlying video (dragging moves the video, not the crop box)
   const videoOffsetRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -265,6 +267,15 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
   useEffect(() => {
     logoImgRef.current = null;
   }, [overlayLogoSrc]);
+
+  // Preload kanye custom image
+  useEffect(() => {
+    if (!kanyeImgRef.current) {
+      const img = new Image();
+      img.src = '/willkanyereleasebullybeforemar21.png';
+      kanyeImgRef.current = img;
+    }
+  }, []);
 
   // Clear video error when videoSrc changes and set up loading state
   useEffect(() => {
@@ -549,6 +560,49 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
   }
 
   function drawMarketCardOnContext({ ctx, boxY }: DrawMarketCardParams): void {
+    // Special handling for kanye tag - show custom image instead of market card
+    if (tag?.trim().toLowerCase() === 'kanye') {
+      const kanyeImg = kanyeImgRef.current;
+      if (kanyeImg && kanyeImg.complete && kanyeImg.width && kanyeImg.height) {
+        // Card dimensions exactly match the image (930x134)
+        const cardWidth = 930;
+        const cardHeight = 134;
+        const boxPadding = (CANVAS_W - cardWidth) / 2; // Center horizontally
+        const boxX = boxPadding;
+
+        // Draw rounded rectangle background
+        const radius = 16;
+        ctx.fillStyle = '#000';
+        ctx.strokeStyle = 'rgba(113, 118, 123, 0.5)';
+        ctx.lineWidth = 2;
+
+        ctx.beginPath();
+        ctx.moveTo(boxX + radius, boxY);
+        ctx.lineTo(boxX + cardWidth - radius, boxY);
+        ctx.quadraticCurveTo(boxX + cardWidth, boxY, boxX + cardWidth, boxY + radius);
+        ctx.lineTo(boxX + cardWidth, boxY + cardHeight - radius);
+        ctx.quadraticCurveTo(boxX + cardWidth, boxY + cardHeight, boxX + cardWidth - radius, boxY + cardHeight);
+        ctx.lineTo(boxX + radius, boxY + cardHeight);
+        ctx.quadraticCurveTo(boxX, boxY + cardHeight, boxX, boxY + cardHeight - radius);
+        ctx.lineTo(boxX, boxY + radius);
+        ctx.quadraticCurveTo(boxX, boxY, boxX + radius, boxY);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+
+        // Draw image at full size (930x134), fills the entire card
+        ctx.drawImage(kanyeImg, boxX, boxY, cardWidth, cardHeight);
+      } else {
+        // Preload kanye image if not loaded
+        if (!kanyeImgRef.current) {
+          const img = new Image();
+          img.src = '/willkanyereleasebullybeforemar21.png';
+          kanyeImgRef.current = img;
+        }
+      }
+      return;
+    }
+
     if (!tag?.trim() || !marketData || !marketData.markets || marketData.markets.length === 0) {
       return;
     }
