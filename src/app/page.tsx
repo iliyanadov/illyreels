@@ -1081,7 +1081,7 @@ export default function Home() {
         url: row.url,
         caption: row.caption,
         tag: row.tag || '',
-        instagramCaption: row.instagramCaption || '',
+        instagramCaption: (row.instagramCaption || '').slice(0, 2199),
         change: row.change || '',
         data: null,
         marketData: null,
