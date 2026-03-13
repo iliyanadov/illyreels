@@ -1423,6 +1423,7 @@ export default function Home() {
                       <textarea
                         value={entry.instagramCaption}
                         onChange={e => updateEntry(entry.id, 'instagramCaption', e.target.value)}
+                        maxLength={2199}
                         onKeyDown={e => {
                           if ((e.metaKey || e.ctrlKey) && e.key === 'z') {
                             e.preventDefault();
