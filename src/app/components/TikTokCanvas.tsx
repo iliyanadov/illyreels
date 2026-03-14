@@ -109,7 +109,7 @@ interface Props {
   onUploadToInstagram?: (blob: Blob, filename: string) => void | Promise<void>; // Callback to upload to Instagram (called after render)
   onUploadRequest?: (entryId: string) => void; // Callback when upload button is clicked (before render)
   igConnected?: boolean; // Whether Instagram is connected
-  brand?: 'sonotrade' | 'forum' | 'culturesparadox';
+  brand?: 'sonotrade' | 'forum' | 'culturesparadox' | 'empty';
   overlayLogoSrc?: string;
   overlayChange?: string;
   overlayDisplayName?: string;
@@ -428,18 +428,68 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     const metaColor = 'rgba(113, 118, 123, 1)';
     const nameColor = 'rgb(231, 233, 234)';
 
+    const isEmpty = brand === 'empty';
+
     // Calculate number of caption lines to determine dynamic header height
     const captionLines = countCaptionLinesFn(ctx);
 
     // Dynamic header height based on CAPTION_LINE_HEIGHT, minus bottom offset to tighten the box
     const CAPTION_BOTTOM_OFFSET = 18; // Reduce space below last line
     const headerHeight = overlayCaption
-      ? BASE_HEADER_HEIGHT + CAPTION_TOP_PADDING + (captionLines * CAPTION_LINE_HEIGHT) - CAPTION_BOTTOM_OFFSET
-      : BASE_HEADER_HEIGHT;
+      ? (isEmpty ? CAPTION_TOP_PADDING + (captionLines * CAPTION_LINE_HEIGHT) + 20 : BASE_HEADER_HEIGHT + CAPTION_TOP_PADDING + (captionLines * CAPTION_LINE_HEIGHT) - CAPTION_BOTTOM_OFFSET)
+      : (isEmpty ? 0 : BASE_HEADER_HEIGHT);
 
-    // Solid header background
-    ctx.fillStyle = '#000';
-    ctx.fillRect(cx, cy, cw, headerHeight);
+    // Solid header background (skip for empty mode if no caption)
+    if (headerHeight > 0) {
+      ctx.fillStyle = '#000';
+      ctx.fillRect(cx, cy, cw, headerHeight);
+    }
+
+    // For empty mode, only draw caption and skip everything else
+    if (isEmpty) {
+      if (overlayCaption) {
+        const captionFont = '400 42px Chirp, "Comic Sans MS", cursive';
+        const captionColor = 'rgb(231, 233, 234)';
+        const captionBaseline = cy + CAPTION_TOP_PADDING + 50;
+        const captionLeft = cx + padX;
+
+        ctx.font = captionFont;
+        ctx.fillStyle = captionColor;
+
+        // Split by user's explicit newlines first, then wrap each line
+        const userLines = overlayCaption.split('\n');
+        const maxWidth = cw - padX * 2;
+        let y = captionBaseline;
+
+        for (let lineIndex = 0; lineIndex < userLines.length; lineIndex++) {
+          const userLine = userLines[lineIndex];
+          if (!userLine) {
+            // Empty line from user - just advance Y
+            y += CAPTION_LINE_HEIGHT;
+            continue;
+          }
+
+          const words = userLine.split(' ');
+          let line = '';
+
+          for (let i = 0; i < words.length; i++) {
+            const testLine = line + words[i] + ' ';
+            const metrics = ctx.measureText(testLine);
+
+            if (metrics.width > maxWidth && i > 0) {
+              ctx.fillText(line, captionLeft, y);
+              line = words[i] + ' ';
+              y += CAPTION_LINE_HEIGHT;
+            } else {
+              line = testLine;
+            }
+          }
+          ctx.fillText(line, captionLeft, y);
+          y += CAPTION_LINE_HEIGHT;
+        }
+      }
+      return headerHeight;
+    }
 
     // Baselines for name and handle
     const baselineName = cy + padY + lineH;
@@ -978,14 +1028,16 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
         ctx.drawImage(video, dx, dy, drawW, drawH);
         ctx.restore();
 
-        // Draw brand element below the video
-        if (brand === 'forum') {
-          drawForumBannerOnContext({ ctx, boxY: y + h + 30 });
-        } else if (brand === 'culturesparadox' && tag?.toLowerCase() === 'duelrocket') {
-          // Overlap video by 15px (move banner up)
-          drawDuelrocketBannerOnContext({ ctx, boxY: y + h - 15 });
-        } else {
-          drawMarketCardOnContext({ ctx, boxY: y + h + 30 });
+        // Draw brand element below the video (skip for empty mode)
+        if (brand !== 'empty') {
+          if (brand === 'forum') {
+            drawForumBannerOnContext({ ctx, boxY: y + h + 30 });
+          } else if (brand === 'culturesparadox' && tag?.toLowerCase() === 'duelrocket') {
+            // Overlap video by 15px (move banner up)
+            drawDuelrocketBannerOnContext({ ctx, boxY: y + h - 15 });
+          } else {
+            drawMarketCardOnContext({ ctx, boxY: y + h + 30 });
+          }
         }
       }
     }
@@ -1894,16 +1946,18 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
         // @ts-ignore - OffscreenCanvasRenderingContext2D is compatible for our use
         drawHeaderOnContext({ ctx: offscreenCtx, cx: 0, cy: headerY, cw: CANVAS_W, countCaptionLinesFn: countCaptionLines });
 
-        // Draw brand element below video (exact match with main canvas)
-        if (brand === 'forum') {
-          // @ts-ignore - OffscreenCanvasRenderingContext2D is compatible for our use
-          drawForumBannerOnContext({ ctx: offscreenCtx, boxY: box.y + box.h + 30 });
-        } else if (brand === 'culturesparadox' && tag?.toLowerCase() === 'duelrocket') {
-          // @ts-ignore - OffscreenCanvasRenderingContext2D is compatible for our use
-          drawDuelrocketBannerOnContext({ ctx: offscreenCtx, boxY: box.y + box.h - 15 });
-        } else {
-          // @ts-ignore - OffscreenCanvasRenderingContext2D is compatible for our use
-          drawMarketCardOnContext({ ctx: offscreenCtx, boxY: box.y + box.h + 30 });
+        // Draw brand element below video (exact match with main canvas, skip for empty mode)
+        if (brand !== 'empty') {
+          if (brand === 'forum') {
+            // @ts-ignore - OffscreenCanvasRenderingContext2D is compatible for our use
+            drawForumBannerOnContext({ ctx: offscreenCtx, boxY: box.y + box.h + 30 });
+          } else if (brand === 'culturesparadox' && tag?.toLowerCase() === 'duelrocket') {
+            // @ts-ignore - OffscreenCanvasRenderingContext2D is compatible for our use
+            drawDuelrocketBannerOnContext({ ctx: offscreenCtx, boxY: box.y + box.h - 15 });
+          } else {
+            // @ts-ignore - OffscreenCanvasRenderingContext2D is compatible for our use
+            drawMarketCardOnContext({ ctx: offscreenCtx, boxY: box.y + box.h + 30 });
+          }
         }
 
         // Create VideoSample from offscreen canvas

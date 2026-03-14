@@ -147,8 +147,8 @@ export default function Home() {
   // Store refs for each canvas to trigger downloads
   const canvasRefsMap = useRef<Map<string, TikTokCanvasRef>>(new Map());
 
-  // Brand toggle: 'sonotrade' | 'forum' | 'culturesparadox'
-  const [brandMode, setBrandMode] = useState<'sonotrade' | 'forum' | 'culturesparadox'>('sonotrade');
+  // Brand toggle: 'sonotrade' | 'forum' | 'culturesparadox' | 'empty'
+  const [brandMode, setBrandMode] = useState<'sonotrade' | 'forum' | 'culturesparadox' | 'empty'>('sonotrade');
 
   // Update sheet name based on brand mode
   useEffect(() => {
@@ -156,6 +156,7 @@ export default function Home() {
       sonotrade: 'SonotradeHQ',
       culturesparadox: 'CulturesParadox',
       forum: 'Forum',
+      empty: 'Empty',
     };
     setSheetName(brandToSheetName[brandMode] || 'SonotradeHQ');
   }, [brandMode]);
@@ -1294,6 +1295,16 @@ export default function Home() {
               )}
               Forum Market
             </button>
+            <button
+              onClick={() => setBrandMode('empty')}
+              className={`rounded-md px-3 py-1 text-xs font-semibold transition-colors ${
+                brandMode === 'empty'
+                  ? 'bg-zinc-100 text-zinc-900'
+                  : 'text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              Empty
+            </button>
           </div>
         </div>
       </div>
@@ -1590,16 +1601,19 @@ export default function Home() {
                     overlayLogoSrc={
                       brandMode === 'forum' ? '/logoForum.png' :
                       brandMode === 'culturesparadox' ? '/culturesparadox.png' :
+                      brandMode === 'empty' ? '' :
                       '/templatelogo.png'
                     }
                     overlayDisplayName={
                       brandMode === 'forum' ? 'Forum Market' :
                       brandMode === 'culturesparadox' ? 'Cultures Paradox' :
+                      brandMode === 'empty' ? '' :
                       'Sonotrade'
                     }
                     overlayHandle={
                       brandMode === 'forum' ? '@ForumDotMarket' :
                       brandMode === 'culturesparadox' ? '@culturesparadox' :
+                      brandMode === 'empty' ? '' :
                       '@SonotradeHQ'
                     }
                     overlayChange={entry.change}
