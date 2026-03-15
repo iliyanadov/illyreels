@@ -164,6 +164,8 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
   const marketImgLoadedRef = useRef(false);
   // Cached image for the DuelRocket banner
   const duelrocketImgRef = useRef<HTMLImageElement | null>(null);
+  // Cached image for the BetOnline banner
+  const betonlineImgRef = useRef<HTMLImageElement | null>(null);
   // Cached image for the kanye custom card
   const kanyeImgRef = useRef<HTMLImageElement | null>(null);
 
@@ -982,6 +984,33 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     }
   }
 
+  function drawBetonlineBannerOnContext({ ctx, boxY }: { ctx: CanvasRenderingContext2D; boxY: number }): void {
+    // BetOnline banner: 720px width, height scaled from 9603x2021 native
+    const targetWidth = 720;
+    const boxX = (CANVAS_W - targetWidth) / 2; // Center horizontally
+
+    // Load BetOnline image if not cached
+    let banner = betonlineImgRef.current;
+    if (!banner) {
+      banner = new Image();
+      banner.src = '/BetOnline.png';
+      betonlineImgRef.current = banner;
+    }
+
+    // Draw the banner image scaled to 720px width while preserving aspect ratio
+    if (banner.complete && banner.width && banner.height) {
+      const scaleX = targetWidth / banner.width;
+      const drawH = banner.height * scaleX;
+      const drawY = boxY;
+
+      ctx.drawImage(banner, boxX, drawY, targetWidth, drawH);
+    } else {
+      // Fallback: blue background while loading
+      ctx.fillStyle = '#1a365d';
+      ctx.fillRect(boxX, boxY, targetWidth, 152); // ~152 = 2021 * (720/9603)
+    }
+  }
+
   // ── Draw loop (black bg + global header + cropped video) ─────────────────────
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -1035,6 +1064,9 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
           } else if (brand === 'culturesparadox' && tag?.toLowerCase() === 'duelrocket') {
             // Overlap video by 15px (move banner up)
             drawDuelrocketBannerOnContext({ ctx, boxY: y + h - 15 });
+          } else if (brand === 'culturesparadox' && tag?.toLowerCase() === 'betonline') {
+            // Overlap video by 15px (move banner up)
+            drawBetonlineBannerOnContext({ ctx, boxY: y + h - 15 });
           } else {
             drawMarketCardOnContext({ ctx, boxY: y + h + 30 });
           }
@@ -1257,8 +1289,10 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     // Market box / banner height (if present)
     const hasMarketBox = tag?.trim() && marketData && marketData.markets && marketData.markets.length > 0;
     const hasDuelrocketBanner = brand === 'culturesparadox' && tag?.toLowerCase() === 'duelrocket';
+    const hasBetonlineBanner = brand === 'culturesparadox' && tag?.toLowerCase() === 'betonline';
     // DuelRocket: 385px height (1027 * 720/1920) minus 15px overlap = 370px effective
-    const marketBoxHeight = hasMarketBox ? 140 + 30 : hasDuelrocketBanner ? 385 - 15 : 0;
+    // BetOnline: 152px height (2021 * 720/9603) minus 15px overlap = 137px effective
+    const marketBoxHeight = hasMarketBox ? 140 + 30 : hasDuelrocketBanner ? 385 - 15 : hasBetonlineBanner ? 152 - 15 : 0;
 
     // Total content height
     const totalHeight = headerHeight + cropBoxHeight + marketBoxHeight;
@@ -1954,6 +1988,9 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
           } else if (brand === 'culturesparadox' && tag?.toLowerCase() === 'duelrocket') {
             // @ts-ignore - OffscreenCanvasRenderingContext2D is compatible for our use
             drawDuelrocketBannerOnContext({ ctx: offscreenCtx, boxY: box.y + box.h - 15 });
+          } else if (brand === 'culturesparadox' && tag?.toLowerCase() === 'betonline') {
+            // @ts-ignore - OffscreenCanvasRenderingContext2D is compatible for our use
+            drawBetonlineBannerOnContext({ ctx: offscreenCtx, boxY: box.y + box.h - 15 });
           } else {
             // @ts-ignore - OffscreenCanvasRenderingContext2D is compatible for our use
             drawMarketCardOnContext({ ctx: offscreenCtx, boxY: box.y + box.h + 30 });
