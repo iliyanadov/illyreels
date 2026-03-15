@@ -436,7 +436,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     // Dynamic header height based on CAPTION_LINE_HEIGHT, minus bottom offset to tighten the box
     const CAPTION_BOTTOM_OFFSET = 18; // Reduce space below last line
     const headerHeight = overlayCaption
-      ? (isEmpty ? CAPTION_TOP_PADDING + (captionLines * CAPTION_LINE_HEIGHT) + 20 : BASE_HEADER_HEIGHT + CAPTION_TOP_PADDING + (captionLines * CAPTION_LINE_HEIGHT) - CAPTION_BOTTOM_OFFSET)
+      ? (isEmpty ? CAPTION_TOP_PADDING + 150 + (captionLines * CAPTION_LINE_HEIGHT) + 20 : BASE_HEADER_HEIGHT + CAPTION_TOP_PADDING + (captionLines * CAPTION_LINE_HEIGHT) - CAPTION_BOTTOM_OFFSET)
       : (isEmpty ? 0 : BASE_HEADER_HEIGHT);
 
     // Solid header background (skip for empty mode if no caption)
@@ -450,7 +450,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
       if (overlayCaption) {
         const captionFont = '400 42px Chirp, "Comic Sans MS", cursive';
         const captionColor = 'rgb(231, 233, 234)';
-        const captionBaseline = cy + CAPTION_TOP_PADDING + 50;
+        const captionBaseline = cy + CAPTION_TOP_PADDING + 150;
         const captionLeft = cx + padX;
 
         ctx.font = captionFont;
