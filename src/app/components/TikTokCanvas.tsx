@@ -1057,17 +1057,18 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
         ctx.drawImage(video, dx, dy, drawW, drawH);
         ctx.restore();
 
-        // Draw brand element below the video (skip for empty mode)
-        if (brand !== 'empty') {
+        // Draw brand element below the video (skip for empty mode, except betonline)
+        if (brand !== 'empty' || (brand === 'empty' && tag?.toLowerCase() === 'betonline')) {
           if (brand === 'forum') {
             drawForumBannerOnContext({ ctx, boxY: y + h + 30 });
           } else if (brand === 'culturesparadox' && tag?.toLowerCase() === 'duelrocket') {
             // Overlap video by 15px (move banner up)
             drawDuelrocketBannerOnContext({ ctx, boxY: y + h - 15 });
-          } else if (brand === 'culturesparadox' && tag?.toLowerCase() === 'betonline') {
+          } else if (tag?.toLowerCase() === 'betonline') {
+            // Works for both culturesparadox and empty brands
             // Overlap video by 15px (move banner up)
             drawBetonlineBannerOnContext({ ctx, boxY: y + h - 15 });
-          } else {
+          } else if (brand !== 'empty') {
             drawMarketCardOnContext({ ctx, boxY: y + h + 30 });
           }
         }
@@ -1289,7 +1290,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     // Market box / banner height (if present)
     const hasMarketBox = tag?.trim() && marketData && marketData.markets && marketData.markets.length > 0;
     const hasDuelrocketBanner = brand === 'culturesparadox' && tag?.toLowerCase() === 'duelrocket';
-    const hasBetonlineBanner = brand === 'culturesparadox' && tag?.toLowerCase() === 'betonline';
+    const hasBetonlineBanner = tag?.toLowerCase() === 'betonline'; // Works for both culturesparadox and empty
     // DuelRocket: 385px height (1027 * 720/1920) minus 15px overlap = 370px effective
     // BetOnline: 152px height (2021 * 720/9603) minus 15px overlap = 137px effective
     const marketBoxHeight = hasMarketBox ? 140 + 30 : hasDuelrocketBanner ? 385 - 15 : hasBetonlineBanner ? 152 - 15 : 0;
@@ -1980,18 +1981,19 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
         // @ts-ignore - OffscreenCanvasRenderingContext2D is compatible for our use
         drawHeaderOnContext({ ctx: offscreenCtx, cx: 0, cy: headerY, cw: CANVAS_W, countCaptionLinesFn: countCaptionLines });
 
-        // Draw brand element below video (exact match with main canvas, skip for empty mode)
-        if (brand !== 'empty') {
+        // Draw brand element below video (exact match with main canvas, skip for empty mode except betonline)
+        if (brand !== 'empty' || (brand === 'empty' && tag?.toLowerCase() === 'betonline')) {
           if (brand === 'forum') {
             // @ts-ignore - OffscreenCanvasRenderingContext2D is compatible for our use
             drawForumBannerOnContext({ ctx: offscreenCtx, boxY: box.y + box.h + 30 });
           } else if (brand === 'culturesparadox' && tag?.toLowerCase() === 'duelrocket') {
             // @ts-ignore - OffscreenCanvasRenderingContext2D is compatible for our use
             drawDuelrocketBannerOnContext({ ctx: offscreenCtx, boxY: box.y + box.h - 15 });
-          } else if (brand === 'culturesparadox' && tag?.toLowerCase() === 'betonline') {
+          } else if (tag?.toLowerCase() === 'betonline') {
+            // Works for both culturesparadox and empty brands
             // @ts-ignore - OffscreenCanvasRenderingContext2D is compatible for our use
             drawBetonlineBannerOnContext({ ctx: offscreenCtx, boxY: box.y + box.h - 15 });
-          } else {
+          } else if (brand !== 'empty') {
             // @ts-ignore - OffscreenCanvasRenderingContext2D is compatible for our use
             drawMarketCardOnContext({ ctx: offscreenCtx, boxY: box.y + box.h + 30 });
           }
