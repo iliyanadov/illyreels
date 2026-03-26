@@ -166,6 +166,8 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
   const duelrocketImgRef = useRef<HTMLImageElement | null>(null);
   // Cached image for the BetOnline banner
   const betonlineImgRef = useRef<HTMLImageElement | null>(null);
+  // Cached image for the Polymarket banner
+  const polymarketImgRef = useRef<HTMLImageElement | null>(null);
   // Cached image for the kanye custom card
   const kanyeImgRef = useRef<HTMLImageElement | null>(null);
 
@@ -498,7 +500,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     const handleBaseline = baselineName + 48;
 
     // Logo on the left, vertically centered alongside both lines of text
-    const logoHeight = 96;
+    const logoHeight = 115;
     const textCenterY = (baselineName + handleBaseline) / 2;
     const logoX = cx + padX;
     let logo = logoImgRef.current;
@@ -1011,6 +1013,33 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     }
   }
 
+  function drawPolymarketBannerOnContext({ ctx, boxY }: { ctx: CanvasRenderingContext2D; boxY: number }): void {
+    // Polymarket banner: 720px width, height scaled from 1407x153 native
+    const targetWidth = 720;
+    const boxX = (CANVAS_W - targetWidth) / 2; // Center horizontally
+
+    // Load Polymarket image if not cached
+    let banner = polymarketImgRef.current;
+    if (!banner) {
+      banner = new Image();
+      banner.src = '/polymarket.png';
+      polymarketImgRef.current = banner;
+    }
+
+    // Draw the banner image scaled to 720px width while preserving aspect ratio
+    if (banner.complete && banner.width && banner.height) {
+      const scaleX = targetWidth / banner.width;
+      const drawH = banner.height * scaleX;
+      const drawY = boxY;
+
+      ctx.drawImage(banner, boxX, drawY, targetWidth, drawH);
+    } else {
+      // Fallback: dark background while loading
+      ctx.fillStyle = '#1a1a2e';
+      ctx.fillRect(boxX, boxY, targetWidth, 78); // ~78 = 153 * (720/1407)
+    }
+  }
+
   // ── Draw loop (black bg + global header + cropped video) ─────────────────────
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -1057,8 +1086,8 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
         ctx.drawImage(video, dx, dy, drawW, drawH);
         ctx.restore();
 
-        // Draw brand element below the video (skip for empty mode, except betonline)
-        if (brand !== 'empty' || (brand === 'empty' && tag?.toLowerCase() === 'betonline')) {
+        // Draw brand element below the video (skip for empty mode, except betonline/polymarket)
+        if (brand !== 'empty' || (brand === 'empty' && (tag?.toLowerCase() === 'betonline' || tag?.toLowerCase() === 'polymarket'))) {
           if (brand === 'forum') {
             drawForumBannerOnContext({ ctx, boxY: y + h + 30 });
           } else if (brand === 'culturesparadox' && tag?.toLowerCase() === 'duelrocket') {
@@ -1068,6 +1097,10 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
             // Works for both culturesparadox and empty brands
             // Overlap video by 15px (move banner up)
             drawBetonlineBannerOnContext({ ctx, boxY: y + h - 15 });
+          } else if (tag?.toLowerCase() === 'polymarket') {
+            // Works for both culturesparadox and empty brands
+            // Overlap video by 15px (move banner up)
+            drawPolymarketBannerOnContext({ ctx, boxY: y + h - 15 });
           } else if (brand !== 'empty') {
             drawMarketCardOnContext({ ctx, boxY: y + h + 30 });
           }
@@ -1291,9 +1324,11 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     const hasMarketBox = tag?.trim() && marketData && marketData.markets && marketData.markets.length > 0;
     const hasDuelrocketBanner = brand === 'culturesparadox' && tag?.toLowerCase() === 'duelrocket';
     const hasBetonlineBanner = tag?.toLowerCase() === 'betonline'; // Works for both culturesparadox and empty
+    const hasPolymarketBanner = tag?.toLowerCase() === 'polymarket'; // Works for both culturesparadox and empty
     // DuelRocket: 385px height (1027 * 720/1920) minus 15px overlap = 370px effective
     // BetOnline: 152px height (2021 * 720/9603) minus 15px overlap = 137px effective
-    const marketBoxHeight = hasMarketBox ? 140 + 30 : hasDuelrocketBanner ? 385 - 15 : hasBetonlineBanner ? 152 - 15 : 0;
+    // Polymarket: 78px height (153 * 720/1407) minus 15px overlap = 63px effective
+    const marketBoxHeight = hasMarketBox ? 140 + 30 : hasDuelrocketBanner ? 385 - 15 : hasBetonlineBanner ? 152 - 15 : hasPolymarketBanner ? 78 - 15 : 0;
 
     // Total content height
     const totalHeight = headerHeight + cropBoxHeight + marketBoxHeight;
@@ -1981,8 +2016,8 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
         // @ts-ignore - OffscreenCanvasRenderingContext2D is compatible for our use
         drawHeaderOnContext({ ctx: offscreenCtx, cx: 0, cy: headerY, cw: CANVAS_W, countCaptionLinesFn: countCaptionLines });
 
-        // Draw brand element below video (exact match with main canvas, skip for empty mode except betonline)
-        if (brand !== 'empty' || (brand === 'empty' && tag?.toLowerCase() === 'betonline')) {
+        // Draw brand element below video (exact match with main canvas, skip for empty mode except betonline/polymarket)
+        if (brand !== 'empty' || (brand === 'empty' && (tag?.toLowerCase() === 'betonline' || tag?.toLowerCase() === 'polymarket'))) {
           if (brand === 'forum') {
             // @ts-ignore - OffscreenCanvasRenderingContext2D is compatible for our use
             drawForumBannerOnContext({ ctx: offscreenCtx, boxY: box.y + box.h + 30 });
@@ -1993,6 +2028,11 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
             // Works for both culturesparadox and empty brands
             // @ts-ignore - OffscreenCanvasRenderingContext2D is compatible for our use
             drawBetonlineBannerOnContext({ ctx: offscreenCtx, boxY: box.y + box.h - 15 });
+          } else if (tag?.toLowerCase() === 'polymarket') {
+            // Works for both culturesparadox and empty brands
+            // Overlap video by 15px (move banner up)
+            // @ts-ignore - OffscreenCanvasRenderingContext2D is compatible for our use
+            drawPolymarketBannerOnContext({ ctx: offscreenCtx, boxY: box.y + box.h - 15 });
           } else if (brand !== 'empty') {
             // @ts-ignore - OffscreenCanvasRenderingContext2D is compatible for our use
             drawMarketCardOnContext({ ctx: offscreenCtx, boxY: box.y + box.h + 30 });
