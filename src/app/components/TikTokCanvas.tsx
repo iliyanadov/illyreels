@@ -1449,8 +1449,8 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
         BufferTarget,
         VideoSample,
         VideoSampleSource,
-        EncodedAudioPacketSource,
-        EncodedPacketSink,
+        AudioSampleSource,
+        AudioSampleSink,
         Input,
         BlobSource,
         ALL_FORMATS,
@@ -1920,19 +1920,18 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
       });
       output.addVideoTrack(videoSource);
 
-      // Set up audio track BEFORE starting output
+      // Set up audio track BEFORE starting output.
+      // We DECODE source AAC and RE-ENCODE to AAC-LC. The previous passthrough copied the
+      // source profile verbatim, which broke IG uploads when the source was HE-AACv2 (TikTok).
       let audioSource: any = null;
-      let audioPackets: any[] = []; // Store EncodedPackets from mediabunny
-      let audioDecoderConfigForExport: any = null;
+      let decodedAudioSamples: any[] = [];
 
       if (audioSamples.length > 0) {
-        console.log('[startRecording] Setting up audio using mediabunny Input...');
+        console.log('[startRecording] Setting up audio (decode → AAC-LC re-encode)...');
 
         try {
-          // Fetch video as Blob
           const videoBlob = await fetch(videoSrc).then(r => r.blob());
 
-          // Open with mediabunny Input
           const input = new Input({
             source: new BlobSource(videoBlob),
             formats: ALL_FORMATS,
@@ -1941,36 +1940,31 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
           const audioTrack = await input.getPrimaryAudioTrack();
 
           if (audioTrack) {
-            // Get the decoder config - this is the exact format WebCodecs wants
-            audioDecoderConfigForExport = await audioTrack.getDecoderConfig();
-            console.log('[startRecording] Audio decoderConfig from mediabunny:', audioDecoderConfigForExport);
-
-            // Create EncodedAudioPacketSource and add to output BEFORE start()
-            audioSource = new EncodedAudioPacketSource('aac');
+            // AudioSampleSource encodes via WebCodecs; 'aac' produces AAC-LC by default,
+            // which is what Instagram Reels requires.
+            audioSource = new AudioSampleSource({
+              codec: 'aac',
+              bitrate: 128_000,
+            });
             output.addAudioTrack(audioSource);
 
-            // Create EncodedPacketSink to iterate packets in decode order
-            const sink = new EncodedPacketSink(audioTrack);
+            // AudioSampleSink decodes the source on the fly.
+            const sink = new AudioSampleSink(audioTrack);
 
-            // Collect all packets using the packets() async generator
-            for await (const packet of sink.packets()) {
-              audioPackets.push(packet);
+            for await (const sample of sink.samples()) {
+              decodedAudioSamples.push(sample);
             }
 
-            console.log('[startRecording] Collected', audioPackets.length, 'audio packets from mediabunny');
+            console.log('[startRecording] Decoded', decodedAudioSamples.length, 'audio samples');
 
-            // Get the first timestamp for alignment
-            const firstTimestamp = audioPackets[0]?.timestamp || 0;
-            console.log('[startRecording] First audio timestamp:', firstTimestamp);
-
-            // Align timestamps to start at 0
-            for (const packet of audioPackets) {
-              packet.timestamp = packet.timestamp - firstTimestamp;
+            const firstTimestamp = decodedAudioSamples[0]?.timestamp ?? 0;
+            if (firstTimestamp !== 0) {
+              for (const s of decodedAudioSamples) {
+                s.setTimestamp(s.timestamp - firstTimestamp);
+              }
             }
-
-            // Remove any packets with negative timestamps after alignment
-            audioPackets = audioPackets.filter((p: any) => p.timestamp >= 0);
-            console.log('[startRecording] After alignment and filtering:', audioPackets.length, 'packets');
+            decodedAudioSamples = decodedAudioSamples.filter((s: any) => s.timestamp >= 0);
+            console.log('[startRecording] After alignment:', decodedAudioSamples.length, 'samples');
           }
         } catch (audioError) {
           console.error('[startRecording] Audio setup failed:', audioError);
@@ -2101,23 +2095,16 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
         frame.close();
       }
 
-      // Add audio packets using stored EncodedPacket objects from mediabunny
-      if (audioSource && audioPackets.length > 0) {
-        setRecStatus('Adding audio...');
-        console.log('[startRecording] Adding', audioPackets.length, 'audio packets...');
+      // Encode and mux decoded audio samples (AudioSampleSource handles AAC-LC encoding).
+      if (audioSource && decodedAudioSamples.length > 0) {
+        setRecStatus('Encoding audio...');
+        console.log('[startRecording] Encoding', decodedAudioSamples.length, 'audio samples to AAC-LC...');
 
-        for (let i = 0; i < audioPackets.length; i++) {
-          const packet = audioPackets[i];
-
-          // Pass decoderConfig only on first packet
-          if (i === 0) {
-            await audioSource.add(packet, { decoderConfig: audioDecoderConfigForExport });
-            console.log('[startRecording] Added first audio packet with decoderConfig');
-          } else {
-            await audioSource.add(packet);
-          }
+        for (const sample of decodedAudioSamples) {
+          await audioSource.add(sample);
+          sample.close();
         }
-        console.log('[startRecording] Audio packets added:', audioPackets.length);
+        console.log('[startRecording] Audio encoded and added');
       }
 
       setRecStatus('Finalizing...');
