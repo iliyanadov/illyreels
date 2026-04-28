@@ -22,6 +22,32 @@ interface PublishResponse {
 }
 
 /**
+ * Probe the video URL with a HEAD request so we can see what IG would see.
+ * Returns a small diagnostic object; never throws — failures here are part of the diagnostic.
+ */
+async function probeVideoUrl(videoUrl: string): Promise<Record<string, unknown>> {
+  try {
+    const res = await fetch(videoUrl, { method: 'HEAD', redirect: 'follow' });
+    const diag = {
+      ok: res.ok,
+      status: res.status,
+      statusText: res.statusText,
+      finalUrl: res.url,
+      contentType: res.headers.get('content-type'),
+      contentLength: res.headers.get('content-length'),
+      acceptRanges: res.headers.get('accept-ranges'),
+      cacheControl: res.headers.get('cache-control'),
+    };
+    console.log('[Reels Publish] Video URL probe:', JSON.stringify(diag));
+    return diag;
+  } catch (err: any) {
+    const diag = { ok: false, error: err?.message || String(err) };
+    console.log('[Reels Publish] Video URL probe failed:', JSON.stringify(diag));
+    return diag;
+  }
+}
+
+/**
  * Step 1: Create a media container for the Instagram Reel
  * POST https://graph.instagram.com/{api-version}/{ig-user-id}/media
  */
@@ -100,7 +126,11 @@ async function waitForContainerReady(
     }
 
     if (statusCode === 'ERROR') {
-      throw new Error(`Container processing failed: ${data.status || 'Unknown error'}`);
+      console.error('[Reels Publish] Container failed - full response:', JSON.stringify(data, null, 2));
+      const detail = data.status || data.status_code || 'Unknown error';
+      const err: any = new Error(`Container processing failed: ${detail}`);
+      err.containerResponse = data;
+      throw err;
     }
 
     if (statusCode === 'EXPIRED') {
@@ -206,17 +236,34 @@ export async function POST(request: NextRequest) {
     console.log('[Reels Publish] Caption:', caption.substring(0, 50) + (caption.length > 50 ? '...' : ''));
     console.log('[Reels Publish] Share to feed:', shareToFeed);
 
+    // Step 0: Probe the video URL the way IG would, so we can diagnose blob/CDN issues
+    const probe = await probeVideoUrl(videoUrl);
+
     // Step 1: Create container
-    const containerId = await createContainer(
-      igUserId,
-      videoUrl,
-      caption,
-      shareToFeed,
-      igAccessToken
-    );
+    let containerId: string;
+    try {
+      containerId = await createContainer(
+        igUserId,
+        videoUrl,
+        caption,
+        shareToFeed,
+        igAccessToken
+      );
+    } catch (err: any) {
+      err.probe = probe;
+      err.videoUrl = videoUrl;
+      throw err;
+    }
 
     // Step 2: Wait for container to be ready
-    await waitForContainerReady(containerId, igAccessToken);
+    try {
+      await waitForContainerReady(containerId, igAccessToken);
+    } catch (err: any) {
+      err.probe = probe;
+      err.videoUrl = videoUrl;
+      err.containerId = containerId;
+      throw err;
+    }
 
     // Step 3: Publish the reel
     const mediaId = await publishContainer(igUserId, containerId, igAccessToken);
@@ -263,7 +310,15 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json(
-      { error: error?.message || 'Failed to publish reel' },
+      {
+        error: error?.message || 'Failed to publish reel',
+        diagnostic: {
+          videoUrl: error?.videoUrl,
+          probe: error?.probe,
+          containerId: error?.containerId,
+          containerResponse: error?.containerResponse,
+        },
+      },
       { status: 500 }
     );
   }

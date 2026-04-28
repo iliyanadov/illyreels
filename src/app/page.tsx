@@ -189,6 +189,10 @@ export default function Home() {
   const uploadQueueRef = useRef<Array<string>>([]);
   const isProcessingUploadRef = useRef(false);
 
+  // Mirror of `entries` for use in callbacks that need fresh state outside the render closure
+  const entriesRef = useRef<VideoEntry[]>([]);
+  useEffect(() => { entriesRef.current = entries; });
+
   // Bulk upload to Instagram state
   const [bulkUploading, setBulkUploading] = useState(false);
   const [bulkUploadPaused, setBulkUploadPaused] = useState(false);
@@ -308,6 +312,26 @@ export default function Home() {
     setEntries(prev => prev.map(e =>
       e.id === id ? { ...e, videoFailed: true } : e
     ));
+  }
+
+  // Re-mint a fresh download URL for an entry (e.g., when its rapidcdn JWT has aged out).
+  // Updates entry.data with the new payload — the canvas's videoSrc prop will change reactively.
+  async function refetchEntrySrc(id: string): Promise<void> {
+    const entry = entriesRef.current.find(e => e.id === id);
+    if (!entry?.url?.trim()) return;
+    console.log('[Refetch] Fetching fresh URL for entry:', id, entry.url);
+    const res = await fetch('/api/download', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: entry.url.trim() }),
+    });
+    if (!res.ok) {
+      console.error('[Refetch] /api/download failed:', res.status);
+      throw new Error(`Refetch failed: ${res.status}`);
+    }
+    const json = await res.json();
+    setEntries(prev => prev.map(e => e.id === id ? { ...e, data: json } : e));
+    console.log('[Refetch] ✅ Fresh URL applied for entry:', id);
   }
 
   function updateEntry(id: string, field: 'url' | 'caption' | 'tag' | 'change' | 'instagramCaption', value: string) {
@@ -773,7 +797,13 @@ export default function Home() {
 
       if (!publishRes.ok) {
         const error = await publishRes.json();
-        throw new Error(error.error || 'Failed to publish to Instagram');
+        if (error.diagnostic) {
+          console.error('[Publish Diagnostic]', error.diagnostic);
+        }
+        const diagSummary = error.diagnostic
+          ? ` | diagnostic: ${JSON.stringify(error.diagnostic)}`
+          : '';
+        throw new Error((error.error || 'Failed to publish to Instagram') + diagSummary);
       }
 
       const publishData = await publishRes.json();
@@ -1593,6 +1623,7 @@ export default function Home() {
                     rowNumber={entry.sheetRow !== undefined ? entry.sheetRow - 1 : 0}
                     queuePosition={entry.queuePosition}
                     onVideoError={() => handleVideoError(entry.id)}
+                    onRefetchSrc={() => refetchEntrySrc(entry.id)}
                     onExportComplete={(blob, filename) => handleExportComplete(entry.id, blob, filename)}
                     onUploadToInstagram={(blob, filename) => handleUploadToInstagram(entry.id, blob, filename)}
                     onUploadRequest={() => handleUploadRequest(entry.id)}

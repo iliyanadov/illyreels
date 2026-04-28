@@ -105,6 +105,7 @@ interface Props {
   rowNumber?: number; // Row number for ordered exports
   queuePosition?: number; // Position in upload queue (undefined = not queued)
   onVideoError?: () => void; // Callback when video fails to load
+  onRefetchSrc?: () => Promise<void>; // Re-mint a fresh URL via /api/download (parent updates videoSrc prop)
   onExportComplete?: (blob: Blob, filename: string) => void | Promise<void>; // Callback after export
   onUploadToInstagram?: (blob: Blob, filename: string) => void | Promise<void>; // Callback to upload to Instagram (called after render)
   onUploadRequest?: (entryId: string) => void; // Callback when upload button is clicked (before render)
@@ -133,6 +134,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
   rowNumber = 0,
   queuePosition,
   onVideoError,
+  onRefetchSrc,
   onExportComplete,
   onUploadToInstagram,
   onUploadRequest,
@@ -184,6 +186,13 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
   const [videoError, setVideoError] = useState<string | null>(null);
   // Video loading state - true when video is still fetching data
   const [isVideoLoading, setIsVideoLoading] = useState(false);
+
+  // Retry state — resets on every videoSrc change; refetch flag resets per videoId
+  const retryCountRef = useRef(0);
+  const hasRefetchedRef = useRef(false);
+  const onRefetchSrcRef = useRef(onRefetchSrc);
+  useEffect(() => { onRefetchSrcRef.current = onRefetchSrc; }, [onRefetchSrc]);
+  useEffect(() => { hasRefetchedRef.current = false; }, [videoId]);
 
   // Box lives in both a ref (for the draw loop) and state (for handle positions)
   const boxRef = useRef<Box>({ x: 0, y: 0, w: CANVAS_W, h: CANVAS_H });
@@ -293,6 +302,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     console.log('[Row ' + (rowNumber + 1) + '] Video src (first 200 chars):', videoSrc.substring(0, Math.min(200, videoSrc.length)));
     setVideoError(null);
     setIsVideoLoading(true);
+    retryCountRef.current = 0;
 
     const video = videoRef.current;
     if (!video) {
@@ -316,8 +326,41 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
       }
     };
 
-    const handleError = () => {
-      console.log('[Row ' + (rowNumber + 1) + `] Video ${videoId} error`);
+    const MAX_QUICK_RETRIES = 2;
+    const retryTimeoutRef: { id: ReturnType<typeof setTimeout> | null } = { id: null };
+
+    const handleError = async () => {
+      const attempt = retryCountRef.current;
+      console.log(`[Row ${rowNumber + 1}] Video ${videoId} error (attempt ${attempt})`);
+
+      // Quick retries with the same URL — handles transient proxy/CDN flakes
+      if (attempt < MAX_QUICK_RETRIES) {
+        retryCountRef.current = attempt + 1;
+        const delayMs = 500 * (attempt + 1);
+        retryTimeoutRef.id = setTimeout(() => {
+          if (!videoRef.current) return;
+          console.log(`[Row ${rowNumber + 1}] Retrying video ${videoId} (attempt ${retryCountRef.current})`);
+          videoRef.current.src = videoSrc;
+          videoRef.current.load();
+        }, delayMs);
+        return;
+      }
+
+      // Exhausted same-URL retries — try a single refetch from /api/download for a fresh JWT
+      const refetch = onRefetchSrcRef.current;
+      if (!hasRefetchedRef.current && refetch) {
+        hasRefetchedRef.current = true;
+        console.log(`[Row ${rowNumber + 1}] Refetching fresh URL for video ${videoId}`);
+        try {
+          await refetch();
+          // Parent will update entry.data → videoSrc prop changes → effect re-runs with fresh URL
+          return;
+        } catch (err) {
+          console.error(`[Row ${rowNumber + 1}] Refetch failed:`, err);
+        }
+      }
+
+      console.error(`[Row ${rowNumber + 1}] Video ${videoId} permanently failed after retries`);
       setIsVideoLoading(false);
     };
 
@@ -341,6 +384,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
 
     return () => {
       clearTimeout(timeoutId);
+      if (retryTimeoutRef.id) clearTimeout(retryTimeoutRef.id);
       video.removeEventListener('loadeddata', handleLoadedData);
       video.removeEventListener('error', handleError);
     };
