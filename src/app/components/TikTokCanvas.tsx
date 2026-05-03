@@ -121,6 +121,7 @@ interface Props {
   tag?: string;
   marketData?: MarketData | null;
   stripAudio?: boolean; // If true, exports a video-only MP4 (debug toggle for IG copyright issues)
+  lowBitrate?: boolean; // If true, uses ~1.5 Mbps video bitrate (debug toggle to test IG size limits)
 }
 
 export interface TikTokCanvasRef {
@@ -151,6 +152,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
   tag = '',
   marketData = null,
   stripAudio = false,
+  lowBitrate = false,
 }: Props, ref) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const videoRef  = useRef<HTMLVideoElement>(null);
@@ -1917,11 +1919,14 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
         target: new BufferTarget(),
       });
 
-      // Set up video encoder
+      // Set up video encoder. lowBitrate is a debug toggle: ~1.5 Mbps targets ~4 MB for
+      // a 21s clip, so we can test whether IG's "Payload too large" error correlates with
+      // file size rather than format.
       const videoSource = new VideoSampleSource({
         codec: 'avc',
-        bitrate: QUALITY_HIGH,
+        bitrate: lowBitrate ? 1_500_000 : QUALITY_HIGH,
       });
+      if (lowBitrate) console.log('[startRecording] lowBitrate=true — using 1.5 Mbps video');
       output.addVideoTrack(videoSource);
 
       // Set up audio track BEFORE starting output.
