@@ -1919,14 +1919,23 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
         target: new BufferTarget(),
       });
 
-      // Set up video encoder. lowBitrate is a debug toggle: ~1.5 Mbps targets ~4 MB for
-      // a 21s clip, so we can test whether IG's "Payload too large" error correlates with
-      // file size rather than format.
+      // Pick video bitrate to keep output under Meta's hidden ~10 MB upload cap.
+      // Target ~7 MB total (safety margin), back into a video bitrate from the duration.
+      // Cap at 5 Mbps so very short clips don't burn bits unnecessarily; floor naturally
+      // settles around 0.5 Mbps for 90s clips.
+      const TARGET_BYTES = 7 * 1024 * 1024;
+      const AUDIO_BITRATE_BPS = 128_000;
+      const dynamicBitrate = Math.min(
+        5_000_000,
+        Math.floor((TARGET_BYTES * 8) / videoDuration - AUDIO_BITRATE_BPS)
+      );
+      const videoBitrate = lowBitrate ? 1_500_000 : dynamicBitrate;
+      console.log('[startRecording] Video bitrate:', videoBitrate, 'bps (lowBitrate=' + lowBitrate + ')');
+
       const videoSource = new VideoSampleSource({
         codec: 'avc',
-        bitrate: lowBitrate ? 1_500_000 : QUALITY_HIGH,
+        bitrate: videoBitrate,
       });
-      if (lowBitrate) console.log('[startRecording] lowBitrate=true — using 1.5 Mbps video');
       output.addVideoTrack(videoSource);
 
       // Set up audio track BEFORE starting output.
