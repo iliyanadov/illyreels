@@ -1451,6 +1451,8 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
         VideoSampleSource,
         AudioSampleSource,
         AudioSampleSink,
+        EncodedAudioPacketSource,
+        EncodedPacketSink,
         Input,
         BlobSource,
         ALL_FORMATS,
@@ -1921,13 +1923,20 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
       output.addVideoTrack(videoSource);
 
       // Set up audio track BEFORE starting output.
-      // We DECODE source AAC and RE-ENCODE to AAC-LC. The previous passthrough copied the
-      // source profile verbatim, which broke IG uploads when the source was HE-AACv2 (TikTok).
+      //
+      // Audio strategy:
+      //   - If source is already AAC-LC (e.g., Instagram), do PASSTHROUGH — fast and lossless,
+      //     and avoids the AAC-encoder priming/edit-list pitfalls that some IG uploads tripped on.
+      //   - If source is HE-AAC / HE-AACv2 (e.g., many TikTok clips), DECODE → RE-ENCODE to AAC-LC.
+      //     IG Reels rejects HE-AAC profiles outright, so we have no choice there.
       let audioSource: any = null;
       let decodedAudioSamples: any[] = [];
+      let passthroughPackets: any[] = [];
+      let passthroughDecoderConfig: any = null;
+      let audioMode: 'passthrough' | 'reencode' | null = null;
 
       if (audioSamples.length > 0) {
-        console.log('[startRecording] Setting up audio (decode → AAC-LC re-encode)...');
+        console.log('[startRecording] Setting up audio...');
 
         try {
           const videoBlob = await fetch(videoSrc).then(r => r.blob());
@@ -1940,31 +1949,58 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
           const audioTrack = await input.getPrimaryAudioTrack();
 
           if (audioTrack) {
-            // AudioSampleSource encodes via WebCodecs; 'aac' produces AAC-LC by default,
-            // which is what Instagram Reels requires.
-            audioSource = new AudioSampleSource({
-              codec: 'aac',
-              bitrate: 128_000,
-            });
-            output.addAudioTrack(audioSource);
-
-            // AudioSampleSink decodes the source on the fly.
-            const sink = new AudioSampleSink(audioTrack);
-
-            for await (const sample of sink.samples()) {
-              decodedAudioSamples.push(sample);
+            const decoderConfig = await audioTrack.getDecoderConfig();
+            // Read AAC AudioObjectType from AudioSpecificConfig (top 5 bits of first byte).
+            // 2 = AAC-LC, 5 = HE-AAC (SBR), 29 = HE-AACv2 (PS).
+            let aot: number | null = null;
+            if (decoderConfig?.description) {
+              const desc = decoderConfig.description as ArrayBuffer | ArrayBufferView;
+              const u8 = desc instanceof ArrayBuffer
+                ? new Uint8Array(desc)
+                : new Uint8Array(desc.buffer, desc.byteOffset, desc.byteLength);
+              if (u8.length > 0) aot = u8[0] >> 3;
             }
+            console.log('[startRecording] Source AAC AudioObjectType:', aot);
 
-            console.log('[startRecording] Decoded', decodedAudioSamples.length, 'audio samples');
+            if (aot === 2) {
+              // AAC-LC: passthrough. Preserves byte-exact encoded audio.
+              audioMode = 'passthrough';
+              passthroughDecoderConfig = decoderConfig;
+              audioSource = new EncodedAudioPacketSource('aac');
+              output.addAudioTrack(audioSource);
 
-            const firstTimestamp = decodedAudioSamples[0]?.timestamp ?? 0;
-            if (firstTimestamp !== 0) {
-              for (const s of decodedAudioSamples) {
-                s.setTimestamp(s.timestamp - firstTimestamp);
+              const sink = new EncodedPacketSink(audioTrack);
+              for await (const packet of sink.packets()) {
+                passthroughPackets.push(packet);
               }
+              console.log('[startRecording] Passthrough: collected', passthroughPackets.length, 'AAC-LC packets');
+
+              const firstTs = passthroughPackets[0]?.timestamp ?? 0;
+              if (firstTs !== 0) {
+                for (const p of passthroughPackets) p.timestamp = p.timestamp - firstTs;
+              }
+              passthroughPackets = passthroughPackets.filter((p: any) => p.timestamp >= 0);
+            } else {
+              // HE-AAC / HE-AACv2 / unknown: re-encode to AAC-LC for IG compatibility.
+              audioMode = 'reencode';
+              audioSource = new AudioSampleSource({
+                codec: 'aac',
+                bitrate: 128_000,
+              });
+              output.addAudioTrack(audioSource);
+
+              const sink = new AudioSampleSink(audioTrack);
+              for await (const sample of sink.samples()) {
+                decodedAudioSamples.push(sample);
+              }
+              console.log('[startRecording] Re-encode: decoded', decodedAudioSamples.length, 'audio samples');
+
+              const firstTs = decodedAudioSamples[0]?.timestamp ?? 0;
+              if (firstTs !== 0) {
+                for (const s of decodedAudioSamples) s.setTimestamp(s.timestamp - firstTs);
+              }
+              decodedAudioSamples = decodedAudioSamples.filter((s: any) => s.timestamp >= 0);
             }
-            decodedAudioSamples = decodedAudioSamples.filter((s: any) => s.timestamp >= 0);
-            console.log('[startRecording] After alignment:', decodedAudioSamples.length, 'samples');
           }
         } catch (audioError) {
           console.error('[startRecording] Audio setup failed:', audioError);
@@ -2095,16 +2131,24 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
         frame.close();
       }
 
-      // Encode and mux decoded audio samples (AudioSampleSource handles AAC-LC encoding).
-      if (audioSource && decodedAudioSamples.length > 0) {
+      // Mux audio according to the chosen mode.
+      if (audioSource && audioMode === 'passthrough' && passthroughPackets.length > 0) {
+        setRecStatus('Adding audio...');
+        for (let i = 0; i < passthroughPackets.length; i++) {
+          if (i === 0) {
+            await audioSource.add(passthroughPackets[i], { decoderConfig: passthroughDecoderConfig });
+          } else {
+            await audioSource.add(passthroughPackets[i]);
+          }
+        }
+        console.log('[startRecording] Audio passthrough complete');
+      } else if (audioSource && audioMode === 'reencode' && decodedAudioSamples.length > 0) {
         setRecStatus('Encoding audio...');
-        console.log('[startRecording] Encoding', decodedAudioSamples.length, 'audio samples to AAC-LC...');
-
         for (const sample of decodedAudioSamples) {
           await audioSource.add(sample);
           sample.close();
         }
-        console.log('[startRecording] Audio encoded and added');
+        console.log('[startRecording] Audio re-encode complete');
       }
 
       setRecStatus('Finalizing...');
