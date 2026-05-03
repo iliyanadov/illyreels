@@ -101,10 +101,7 @@ async function waitForContainerReady(
 
   for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt++) {
     const url = new URL(`${GRAPH_HOST}/${GRAPH_VERSION}/${containerId}`);
-    // Query copyright_check_status — IG's rights system silently rejects clips with
-    // copyrighted music (very common with TikTok sources). error_message is undocumented
-    // but Meta sometimes populates it; harmless to ask for.
-    url.searchParams.set('fields', 'status_code,status,copyright_check_status,error_message');
+    url.searchParams.set('fields', 'status_code,status');
     url.searchParams.set('access_token', igAccessToken);
 
     const response = await fetch(url.toString());
