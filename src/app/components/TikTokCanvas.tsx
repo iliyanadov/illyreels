@@ -120,6 +120,7 @@ interface Props {
   overlayCaption?: string;
   tag?: string;
   marketData?: MarketData | null;
+  stripAudio?: boolean; // If true, exports a video-only MP4 (debug toggle for IG copyright issues)
 }
 
 export interface TikTokCanvasRef {
@@ -149,6 +150,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
   overlayCaption = '',
   tag = '',
   marketData = null,
+  stripAudio = false,
 }: Props, ref) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const videoRef  = useRef<HTMLVideoElement>(null);
@@ -1935,7 +1937,11 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
       let passthroughDecoderConfig: any = null;
       let audioMode: 'passthrough' | 'reencode' | null = null;
 
-      if (audioSamples.length > 0) {
+      if (stripAudio) {
+        console.log('[startRecording] stripAudio=true — skipping audio entirely (debug)');
+      }
+
+      if (!stripAudio && audioSamples.length > 0) {
         console.log('[startRecording] Setting up audio...');
 
         try {

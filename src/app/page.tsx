@@ -184,6 +184,9 @@ export default function Home() {
   const [uploadingEntry, setUploadingEntry] = useState<string | null>(null);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadStatus, setUploadStatus] = useState('');
+  // Debug toggle: export with no audio track. Used to test whether IG container ERROR
+  // is caused by copyrighted-music detection vs. format issues.
+  const [stripAudio, setStripAudio] = useState(false);
 
   // Instagram upload queue (ensures only one render+upload at a time)
   const uploadQueueRef = useRef<Array<string>>([]);
@@ -1570,6 +1573,19 @@ export default function Home() {
             </div>
           )}
 
+          {/* Debug toggle — strip audio from exports to test IG copyright rejection */}
+          <div className="flex justify-center mb-3">
+            <label className="flex items-center gap-2 text-xs text-zinc-400 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={stripAudio}
+                onChange={(e) => setStripAudio(e.target.checked)}
+                className="h-3.5 w-3.5 cursor-pointer accent-pink-500"
+              />
+              Strip audio (debug — test IG copyright rejection)
+            </label>
+          </div>
+
           {/* Download/Upload All Buttons */}
           <div className="flex justify-center gap-3 mb-4">
             <button
@@ -1629,6 +1645,7 @@ export default function Home() {
                     onUploadRequest={() => handleUploadRequest(entry.id)}
                     igConnected={!!igUser}
                     brand={brandMode}
+                    stripAudio={stripAudio}
                     overlayLogoSrc={
                       brandMode === 'forum' ? '/logoForum.png' :
                       brandMode === 'culturesparadox' ? '/culturesparadox.png' :
