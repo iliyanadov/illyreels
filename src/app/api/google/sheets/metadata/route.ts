@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getGoogleToken } from '@/lib/google-token-storage';
+import { getGoogleToken, googleFetch } from '@/lib/google-token-storage';
 
 export const runtime = 'nodejs';
 
@@ -35,11 +35,8 @@ export async function GET(request: NextRequest) {
 
     console.log('[Google Sheets Metadata] Fetching from:', url);
 
-    const response = await fetch(url, {
-      headers: {
-        'Authorization': `Bearer ${tokenData.accessToken}`,
-        'Accept': 'application/json',
-      },
+    const response = await googleFetch(url, {
+      headers: { Accept: 'application/json' },
     });
 
     if (!response.ok) {

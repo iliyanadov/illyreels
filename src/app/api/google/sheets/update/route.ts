@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getGoogleToken } from '@/lib/google-token-storage';
+import { getGoogleToken, googleFetch } from '@/lib/google-token-storage';
 
 export const runtime = 'nodejs';
 
@@ -28,12 +28,9 @@ export async function POST(request: NextRequest) {
     const range = `${encodeURIComponent(sheetName)}!E${rowNumber}`;
     const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}?valueInputOption=USER_ENTERED`;
 
-    const response = await fetch(url, {
+    const response = await googleFetch(url, {
       method: 'PUT',
-      headers: {
-        'Authorization': `Bearer ${tokenData.accessToken}`,
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         values: [[status]],
       }),

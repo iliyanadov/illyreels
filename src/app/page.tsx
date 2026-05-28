@@ -172,6 +172,11 @@ export default function Home() {
   const [endRow, setEndRow] = useState('32');
   const [loadingSheets, setLoadingSheets] = useState(false);
   const [sheetsError, setSheetsError] = useState('');
+  // AI caption generation state
+  const [showGenerateModal, setShowGenerateModal] = useState(false);
+  const [generatingCaptions, setGeneratingCaptions] = useState(false);
+  const [generateProgress, setGenerateProgress] = useState('');
+  const [generateError, setGenerateError] = useState('');
 
   // Instagram state (multi-account support)
   const [igUser, setIgUser] = useState<InstagramUser | null>(null);
@@ -1142,6 +1147,72 @@ export default function Home() {
     }
   }
 
+  // Generate AI captions into column D for each row in the range, using the
+  // topic in column F. Processes rows sequentially so we get live progress and
+  // each serverless call stays short.
+  async function generateCaptionsFromSheets() {
+    if (!googleToken || !spreadsheetId.trim()) {
+      setGenerateError('Please provide a spreadsheet ID');
+      return;
+    }
+
+    const start = parseInt(startRow, 10);
+    const end = parseInt(endRow, 10);
+    if (isNaN(start) || isNaN(end) || start < 1 || end < start) {
+      setGenerateError('Please provide a valid row range');
+      return;
+    }
+
+    setGeneratingCaptions(true);
+    setGenerateError('');
+
+    const total = end - start + 1;
+    let done = 0;
+    let generated = 0;
+    let skipped = 0;
+    const failures: Array<{ row: number; error: string }> = [];
+
+    for (let row = start; row <= end; row++) {
+      done++;
+      setGenerateProgress(`Generating ${done}/${total} (row ${row})…`);
+      try {
+        const res = await fetch('/api/google/sheets/generate-caption', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            spreadsheetId: spreadsheetId.trim(),
+            sheetName: sheetName.trim(),
+            rowNumber: row,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          const msg = data.error || `HTTP ${res.status}`;
+          console.error('[Generate] Row', row, 'failed:', msg);
+          failures.push({ row, error: msg });
+        } else if (data.skipped) {
+          skipped++;
+        } else {
+          generated++;
+        }
+      } catch (error: any) {
+        const msg = error?.message || 'Network error';
+        console.error('[Generate] Row', row, msg);
+        failures.push({ row, error: msg });
+      }
+    }
+
+    setGeneratingCaptions(false);
+    let summary = `Done — ${generated} generated, ${skipped} skipped (no topic)`;
+    if (failures.length) {
+      const rows = failures.map(f => f.row).join(', ');
+      // Show the first failure message so the user knows *why* (token expired,
+      // gemini error, etc.) instead of just the row number.
+      summary += `, ${failures.length} failed (rows ${rows}). Reason: ${failures[0].error}`;
+    }
+    setGenerateProgress(summary);
+  }
+
   return (
     <div className="min-h-screen bg-black text-white flex flex-col items-center px-4 py-16">
       {/* Header */}
@@ -1167,6 +1238,16 @@ export default function Home() {
                 className="rounded-lg border border-green-700 bg-green-950/20 px-4 py-2 text-xs font-semibold text-green-400 hover:bg-green-950/40 hover:border-green-600 transition-colors"
               >
                 Import from Sheets
+              </button>
+              <button
+                onClick={() => {
+                  setGenerateError('');
+                  setGenerateProgress('');
+                  setShowGenerateModal(true);
+                }}
+                className="rounded-lg border border-purple-700 bg-purple-950/20 px-4 py-2 text-xs font-semibold text-purple-400 hover:bg-purple-950/40 hover:border-purple-600 transition-colors"
+              >
+                Generate AI Caption
               </button>
               <button
                 onClick={disconnectGoogle}
@@ -1907,6 +1988,125 @@ export default function Home() {
                 className="w-full rounded-lg bg-green-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-green-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {loadingSheets ? 'Importing...' : 'Import Rows'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* AI Caption Generation Modal */}
+      {showGenerateModal && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+          <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6 w-full max-w-md">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold">Generate AI Captions</h2>
+              <button
+                onClick={() => setShowGenerateModal(false)}
+                disabled={generatingCaptions}
+                className="text-zinc-400 hover:text-white transition-colors disabled:opacity-50"
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="18" y1="6" x2="6" y2="18"/>
+                  <line x1="6" y1="6" x2="18" y2="18"/>
+                </svg>
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-zinc-400 mb-2">
+                  Spreadsheet ID
+                </label>
+                <input
+                  type="text"
+                  value={spreadsheetId}
+                  onChange={e => setSpreadsheetId(e.target.value)}
+                  placeholder="From URL: /d/SPREADSHEET_ID/edit"
+                  className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white placeholder-zinc-500 outline-none focus:border-zinc-600 transition-colors"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-zinc-400 mb-2">
+                  Sheet Name
+                </label>
+                {availableSheets.length > 0 ? (
+                  <select
+                    value={sheetName}
+                    onChange={e => setSheetName(e.target.value)}
+                    disabled={loadingSheetNames}
+                    className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white outline-none focus:border-zinc-600 transition-colors disabled:opacity-50"
+                  >
+                    {availableSheets.map(sheet => (
+                      <option key={sheet.id} value={sheet.title}>
+                        {sheet.title}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    value={sheetName}
+                    onChange={e => setSheetName(e.target.value)}
+                    placeholder="SonotradeHQ"
+                    className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white placeholder-zinc-500 outline-none focus:border-zinc-600 transition-colors"
+                  />
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-zinc-400 mb-2">
+                    Start Row
+                  </label>
+                  <input
+                    type="number"
+                    value={startRow}
+                    onChange={e => setStartRow(e.target.value)}
+                    min="1"
+                    className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white outline-none focus:border-zinc-600 transition-colors"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-zinc-400 mb-2">
+                    End Row
+                  </label>
+                  <input
+                    type="number"
+                    value={endRow}
+                    onChange={e => setEndRow(e.target.value)}
+                    min="1"
+                    className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white outline-none focus:border-zinc-600 transition-colors"
+                  />
+                </div>
+              </div>
+
+              <div className="bg-zinc-800/50 rounded-lg px-3 py-2 text-xs text-zinc-400">
+                <p className="font-medium text-zinc-300 mb-1">How it works:</p>
+                <p>• Reads the topic from <span className="text-zinc-300">column F</span> of each row</p>
+                <p>• Generates a caption with Gemini (web search on)</p>
+                <p>• Writes the result into <span className="text-zinc-300">column D</span></p>
+                <p>• Rows with an empty column F are skipped</p>
+              </div>
+
+              {generateError && (
+                <div className="rounded-lg border border-red-800 bg-red-950/50 px-3 py-2 text-xs text-red-400">
+                  {generateError}
+                </div>
+              )}
+
+              {generateProgress && (
+                <div className="rounded-lg border border-purple-800 bg-purple-950/30 px-3 py-2 text-xs text-purple-300">
+                  {generateProgress}
+                </div>
+              )}
+
+              <button
+                onClick={generateCaptionsFromSheets}
+                disabled={generatingCaptions || !spreadsheetId.trim()}
+                className="w-full rounded-lg bg-purple-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-purple-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {generatingCaptions ? 'Generating…' : 'Generate Captions'}
               </button>
             </div>
           </div>
