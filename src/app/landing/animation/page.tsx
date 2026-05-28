@@ -117,6 +117,7 @@ function AboutChart({
   duration = 8000,
   showPulse = true,
   strokeWidth = 2,
+  padY = 20,
   onPrice,
   onChangeData,
   onColor,
@@ -126,6 +127,7 @@ function AboutChart({
   duration?: number
   showPulse?: boolean
   strokeWidth?: number
+  padY?: number
   onPrice?: (p: number) => void
   onChangeData?: (d: { percentChange: number; rawChange: number }) => void
   onColor?: (c: string) => void
@@ -194,8 +196,8 @@ function AboutChart({
   const tStart = chartData[0]?.timestamp ?? 0
   const tEnd = chartData[chartData.length - 1]?.timestamp ?? tStart + 1
   const tRange = tEnd - tStart || 1
-  const PAD_T = 20
-  const PAD_B = 20
+  const PAD_T = padY
+  const PAD_B = padY
 
   const points = useMemo(
     () =>
@@ -675,13 +677,24 @@ function CardContent({
             Index
           </div>
         </div>
-        <div style={{ flex: 1, minWidth: 0, height: 56 }}>
+        <div
+          style={{
+            flex: 1,
+            minWidth: 0,
+            height: 56,
+            border: '1px dashed rgba(255,0,255,0.55)',
+            backgroundImage:
+              'linear-gradient(to right, rgba(255,0,255,0.18) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,0,255,0.18) 1px, transparent 1px)',
+            backgroundSize: '10px 10px',
+          }}
+        >
           <AboutChart
             data={artist.data_points}
             height={56}
             duration={2200}
             showPulse={false}
             strokeWidth={1.5}
+            padY={0}
             onPrice={setDrawingPrice}
             onChangeData={(d) => setDrawingPercent(d.percentChange)}
           />
@@ -693,6 +706,7 @@ function CardContent({
             alignItems: 'flex-end',
             gap: 6,
             flexShrink: 0,
+            width: 92,
           }}
         >
           <span style={{ color: SEC, fontFamily: FONT, fontSize: 12 }}>
