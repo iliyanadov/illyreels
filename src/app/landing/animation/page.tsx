@@ -14,6 +14,7 @@
  */
 
 import React, { useEffect, useMemo, useRef, useState } from 'react'
+import NumberFlow from '@number-flow/react'
 
 // ───────────────────────────────────────────────────────────────────────────
 //   Design tokens
@@ -113,12 +114,18 @@ function useHeroArtists() {
 function AboutChart({
   data = [],
   height: H = 260,
+  duration = 8000,
+  showPulse = true,
+  strokeWidth = 2,
   onPrice,
   onChangeData,
   onColor,
 }: {
   data?: DataPoint[]
   height?: number
+  duration?: number
+  showPulse?: boolean
+  strokeWidth?: number
   onPrice?: (p: number) => void
   onChangeData?: (d: { percentChange: number; rawChange: number }) => void
   onColor?: (c: string) => void
@@ -243,9 +250,8 @@ function AboutChart({
     setDone(false)
     if (rafRef.current) cancelAnimationFrame(rafRef.current)
     startRef.current = performance.now()
-    const DURATION = 8000
     const animate = (now: number) => {
-      const t = Math.min((now - startRef.current) / DURATION, 1)
+      const t = Math.min((now - startRef.current) / duration, 1)
       const eased = 1 - Math.pow(1 - t, 3)
       const colorT = Math.max(0, Math.min(1, (eased - 0.1) / 0.7))
       onColorRef.current?.(lerpRGB(C_NEUTRAL, targetCRef.current, colorT))
@@ -335,7 +341,7 @@ function AboutChart({
             d={linePath}
             fill="none"
             stroke={color}
-            strokeWidth="2"
+            strokeWidth={strokeWidth}
             strokeLinecap="round"
             strokeLinejoin="round"
             strokeDasharray={dashArray}
@@ -344,17 +350,19 @@ function AboutChart({
         )}
         {last && done ? (
           <>
-            <circle
-              cx={last.x}
-              cy={last.y}
-              r="3.5"
-              fill={color}
-              style={{
-                animation: 'sxDotPulse 0.9s ease-out infinite',
-                transformOrigin: 'center',
-                transformBox: 'fill-box',
-              }}
-            />
+            {showPulse && (
+              <circle
+                cx={last.x}
+                cy={last.y}
+                r="3.5"
+                fill={color}
+                style={{
+                  animation: 'sxDotPulse 0.9s ease-out infinite',
+                  transformOrigin: 'center',
+                  transformBox: 'fill-box',
+                }}
+              />
+            )}
             <circle cx={last.x} cy={last.y} r="3.5" fill={color} />
           </>
         ) : (
@@ -568,7 +576,7 @@ function TopArtistsList({ artists }: { artists: ArtistData[] }) {
     if (!artists.length) return
     const t = setInterval(() => {
       setIdx((i) => (i + 1) % artists.length)
-    }, 3000)
+    }, 4500)
     return () => clearInterval(t)
   }, [artists.length])
 
@@ -585,123 +593,157 @@ function TopArtistsList({ artists }: { artists: ArtistData[] }) {
 
   return (
     <div style={{ width: '100%', padding: '0 56px', marginTop: 0 }}>
-      <div
-        key={`${a.name}-${safeIdx}`}
+      <CardContent key={`${a.name}-${safeIdx}`} artist={a} change={change} />
+    </div>
+  )
+}
+
+function CardContent({
+  artist,
+  change,
+}: {
+  artist: ArtistData
+  change: number | null
+}) {
+  const fallbackPrice = artist.index_price ?? 0
+  const [drawingPrice, setDrawingPrice] = useState<number | null>(null)
+  const [drawingPercent, setDrawingPercent] = useState<number | null>(null)
+
+  return (
+    <div
+      style={{
+        animation:
+          'sxArtistFadeIn 0.4s cubic-bezier(0.25,0.46,0.45,0.94) both',
+      }}
+    >
+      <span
         style={{
-          animation:
-            'sxArtistFadeIn 0.4s cubic-bezier(0.25,0.46,0.45,0.94) both',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          padding: 16,
+          border: `2px solid ${BORDER}`,
+          borderRadius: 12,
+          backgroundColor: 'rgba(255,255,255,0.02)',
         }}
       >
-        <span
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 12,
-            padding: 16,
-            border: `2px solid ${BORDER}`,
-            borderRadius: 12,
-            backgroundColor: 'rgba(255,255,255,0.02)',
-          }}
-        >
-          {a.image_url ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={a.image_url}
-              alt={a.name}
-              style={{
-                width: 40,
-                height: 40,
-                flexShrink: 0,
-                borderRadius: '50%',
-                objectFit: 'cover',
-              }}
-            />
-          ) : (
-            <div
-              style={{
-                width: 40,
-                height: 40,
-                borderRadius: '50%',
-                backgroundColor: '#3f3f46',
-                flexShrink: 0,
-              }}
-            />
-          )}
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div
-              style={{
-                color: WHITE,
-                fontFamily: FONT,
-                fontSize: 14,
-                whiteSpace: 'nowrap',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-              }}
-            >
-              {a.name}
-            </div>
-            <div
-              style={{
-                color: SEC,
-                fontFamily: FONT,
-                fontSize: 12,
-                marginTop: 2,
-              }}
-            >
-              Index
-            </div>
+        {artist.image_url ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={artist.image_url}
+            alt={artist.name}
+            style={{
+              width: 40,
+              height: 40,
+              flexShrink: 0,
+              borderRadius: '50%',
+              objectFit: 'cover',
+            }}
+          />
+        ) : (
+          <div
+            style={{
+              width: 40,
+              height: 40,
+              borderRadius: '50%',
+              backgroundColor: '#3f3f46',
+              flexShrink: 0,
+            }}
+          />
+        )}
+        <div style={{ minWidth: 0, flexShrink: 0, width: 110 }}>
+          <div
+            style={{
+              color: WHITE,
+              fontFamily: FONT,
+              fontSize: 14,
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+            }}
+          >
+            {artist.name}
           </div>
           <div
             style={{
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'flex-end',
-              gap: 6,
-              flexShrink: 0,
+              color: SEC,
+              fontFamily: FONT,
+              fontSize: 12,
+              marginTop: 2,
             }}
           >
-            <span style={{ color: SEC, fontFamily: FONT, fontSize: 12 }}>
-              {a.index_price != null
-                ? a.index_price.toLocaleString('en-US', {
+            Index
+          </div>
+        </div>
+        <div style={{ flex: 1, minWidth: 0, height: 56 }}>
+          <AboutChart
+            data={artist.data_points}
+            height={56}
+            duration={2200}
+            showPulse={false}
+            strokeWidth={1.5}
+            onPrice={setDrawingPrice}
+            onChangeData={(d) => setDrawingPercent(d.percentChange)}
+          />
+        </div>
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'flex-end',
+            gap: 6,
+            flexShrink: 0,
+          }}
+        >
+          <span style={{ color: SEC, fontFamily: FONT, fontSize: 12 }}>
+            <NumberFlow
+              value={drawingPrice ?? fallbackPrice}
+              format={{
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              }}
+            />
+            <span style={{ fontSize: 10, marginLeft: 4, fontWeight: 400 }}>
+              points
+            </span>
+          </span>
+          {change != null && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <svg
+                width="10"
+                height="10"
+                viewBox="0 0 24 18"
+                fill="none"
+                style={{
+                  color: change >= 0 ? POSITIVE : NEGATIVE,
+                  transform: `rotate(${change >= 0 ? 0 : 180}deg) translateY(1px)`,
+                }}
+              >
+                <path fill="currentColor" d="m12 0 10.392 14.25H1.608z" />
+              </svg>
+              <span
+                style={{
+                  color: change >= 0 ? POSITIVE : NEGATIVE,
+                  fontFamily: FONT,
+                  fontSize: 12,
+                  fontWeight: 500,
+                }}
+              >
+                <NumberFlow
+                  value={
+                    drawingPercent != null ? Math.abs(drawingPercent) : 0
+                  }
+                  format={{
                     minimumFractionDigits: 2,
                     maximumFractionDigits: 2,
-                  })
-                : '—'}
-              <span style={{ fontSize: 10, marginLeft: 4, fontWeight: 400 }}>
-                USD
+                  }}
+                  suffix="%"
+                />
               </span>
-            </span>
-            {change != null && (
-              <div
-                style={{ display: 'flex', alignItems: 'center', gap: 4 }}
-              >
-                <svg
-                  width="10"
-                  height="10"
-                  viewBox="0 0 24 18"
-                  fill="none"
-                  style={{
-                    color: change >= 0 ? POSITIVE : NEGATIVE,
-                    transform: `rotate(${change >= 0 ? 0 : 180}deg) translateY(1px)`,
-                  }}
-                >
-                  <path fill="currentColor" d="m12 0 10.392 14.25H1.608z" />
-                </svg>
-                <span
-                  style={{
-                    color: change >= 0 ? POSITIVE : NEGATIVE,
-                    fontFamily: FONT,
-                    fontSize: 12,
-                    fontWeight: 500,
-                  }}
-                >
-                  {Math.abs(change).toFixed(2)}%
-                </span>
-              </div>
-            )}
-          </div>
-        </span>
-      </div>
+            </div>
+          )}
+        </div>
+      </span>
     </div>
   )
 }
@@ -1171,11 +1213,11 @@ function ChartArtistHeader({
             transition: 'color 0.6s ease',
           }}
         >
-          $
-          {(drawingPrice ?? fallbackPrice).toLocaleString('en-US', {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2,
-          })}
+          <NumberFlow
+            value={drawingPrice ?? fallbackPrice}
+            format={{ minimumFractionDigits: 2, maximumFractionDigits: 2 }}
+            prefix="$"
+          />
         </span>
         <span
           style={{
@@ -1212,14 +1254,24 @@ function ChartArtistHeader({
               <span
                 style={{ color: chartColor, fontSize: 16, fontFamily: FONT }}
               >
-                {Math.abs(changeData.percentChange).toFixed(2)}%
+                <NumberFlow
+                  value={Math.abs(changeData.percentChange)}
+                  format={{
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  }}
+                  suffix="%"
+                />
               </span>
             </div>
             <span
               style={{ color: chartColor, fontSize: 16, fontFamily: FONT }}
             >
-              {changeData.rawChange >= 0 ? '+$' : '-$'}
-              {Math.abs(changeData.rawChange).toFixed(2)}
+              <NumberFlow
+                value={Math.abs(changeData.rawChange)}
+                format={{ minimumFractionDigits: 2, maximumFractionDigits: 2 }}
+                prefix={changeData.rawChange >= 0 ? '+$' : '-$'}
+              />
             </span>
           </div>
         )}
