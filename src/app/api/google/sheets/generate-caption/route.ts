@@ -19,6 +19,55 @@ const PROMPT_PREFIX =
 
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 
+// Pool of Gemini API keys tried in priority order. Set GEMINI_API_KEYS to a
+// comma-separated list (primary first); falls back to the single GEMINI_API_KEY.
+// Each key should belong to a SEPARATE Google Cloud project, since free-tier
+// rate limits are scoped per project — so the pool multiplies usable quota.
+function getGeminiKeys(): string[] {
+  const pool = (process.env.GEMINI_API_KEYS || '')
+    .split(',')
+    .map((k) => k.trim())
+    .filter(Boolean);
+  if (pool.length) return pool;
+  const single = process.env.GEMINI_API_KEY?.trim();
+  return single ? [single] : [];
+}
+
+type GeminiResult =
+  | { ok: true; caption: string; searchQueries: string[] }
+  | { ok: false; rateLimited: boolean; status: number; detail: string };
+
+// Calls Gemini with Google Search grounding using a specific API key. Returns
+// the caption + the search queries it ran, or a structured failure (rateLimited
+// flags 429/503 so the caller can rotate to the next key in the pool).
+async function generateWithGemini(prompt: string, apiKey: string): Promise<GeminiResult> {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      tools: [{ google_search: {} }],
+    }),
+  });
+
+  if (!res.ok) {
+    const detail = await res.text();
+    // 429 = rate limit / quota exhausted, 503 = model overloaded.
+    const rateLimited = res.status === 429 || res.status === 503;
+    return { ok: false, rateLimited, status: res.status, detail };
+  }
+
+  const data = await res.json();
+  const searchQueries: string[] =
+    data.candidates?.[0]?.groundingMetadata?.webSearchQueries ?? [];
+  const caption = (data.candidates?.[0]?.content?.parts || [])
+    .map((p: { text?: string }) => p.text || '')
+    .join('')
+    .trim();
+  return { ok: true, caption, searchQueries };
+}
+
 // Trims a caption to the limit without cutting mid-sentence/word. Prefers the
 // last sentence end, then the last space, before falling back to a hard slice.
 function capCaption(text: string, max: number): string {
@@ -38,7 +87,8 @@ function capCaption(text: string, max: number): string {
 
 // Generates an Instagram caption for a single sheet row:
 //   1. Reads the topic from column F of `rowNumber`
-//   2. Asks Gemini (with Google Search grounding) to write the caption
+//   2. Asks Gemini (with Google Search grounding) to write the caption,
+//      rotating through the GEMINI_API_KEYS pool if a key is rate limited
 //   3. Writes the result back to column D of the same row
 export async function POST(request: NextRequest) {
   const tokenData = await getGoogleToken();
@@ -50,10 +100,10 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
+  const geminiKeys = getGeminiKeys();
+  if (!geminiKeys.length) {
     return NextResponse.json(
-      { error: 'GEMINI_API_KEY is not configured on the server.' },
+      { error: 'No Gemini API keys configured (set GEMINI_API_KEYS or GEMINI_API_KEY).' },
       { status: 500 }
     );
   }
@@ -103,45 +153,49 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ skipped: true, reason: 'no-topic', rowNumber });
     }
 
-    // 2. Generate the caption with Gemini, grounded with Google Search
+    // 2. Generate the caption with Gemini, grounded with Google Search. Try
+    // each key in the pool in priority order, rotating to the next on failure
+    // (e.g. when a key is rate limited / out of its daily quota).
     const prompt = `${PROMPT_PREFIX} ${topic}`;
-    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
+    let result: Extract<GeminiResult, { ok: true }> | null = null;
+    let usedKey = 0;
+    let lastFailure: Extract<GeminiResult, { ok: false }> | null = null;
 
-    const geminiRes = await fetch(geminiUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        tools: [{ google_search: {} }],
-      }),
-    });
-
-    if (!geminiRes.ok) {
-      const errorText = await geminiRes.text();
-      console.error('[Generate Caption] Gemini API error:', errorText);
-      return NextResponse.json(
-        { error: `Gemini API error (${geminiRes.status})` },
-        { status: 502 }
-      );
+    for (let i = 0; i < geminiKeys.length; i++) {
+      const attempt = await generateWithGemini(prompt, geminiKeys[i]);
+      if (attempt.ok) {
+        result = attempt;
+        usedKey = i + 1;
+        break;
+      }
+      lastFailure = attempt;
+      const why = attempt.rateLimited ? `rate limited (${attempt.status})` : `error ${attempt.status}`;
+      const more = i < geminiKeys.length - 1 ? ' — trying next key' : '';
+      console.warn(`[Generate Caption] Row ${rowNumber} — Gemini key #${i + 1}/${geminiKeys.length} ${why}${more}`);
+      if (!attempt.rateLimited) {
+        console.error('[Generate Caption] Gemini detail:', attempt.detail.slice(0, 300));
+      }
     }
 
-    const geminiData = await geminiRes.json();
+    if (!result) {
+      const status = lastFailure?.status ?? 502;
+      const msg = lastFailure?.rateLimited
+        ? `All ${geminiKeys.length} Gemini key(s) are rate limited (last status ${status})`
+        : `Gemini API error (${status})`;
+      console.error('[Generate Caption] Row', rowNumber, 'all keys failed:', msg);
+      return NextResponse.json({ error: msg }, { status: 502 });
+    }
 
-    // Proof of grounding: if the model actually searched, Gemini returns the
-    // queries it ran in groundingMetadata. Log them (or warn when it skipped
-    // searching and answered from prior knowledge despite the prompt).
-    const searchQueries: string[] =
-      geminiData.candidates?.[0]?.groundingMetadata?.webSearchQueries ?? [];
-    if (searchQueries.length) {
-      console.log('[Generate Caption] Row', rowNumber, '🔎 searched:', searchQueries.join(' | '));
+    // Log which key served this row, and the grounding proof (the queries
+    // Gemini ran, or a warning if it answered without searching).
+    console.log(`[Generate Caption] Row ${rowNumber} — served by Gemini key #${usedKey}/${geminiKeys.length}`);
+    if (result.searchQueries.length) {
+      console.log('[Generate Caption] Row', rowNumber, '🔎 searched:', result.searchQueries.join(' | '));
     } else {
       console.warn('[Generate Caption] Row', rowNumber, '⚠️ no web search performed — caption is ungrounded');
     }
 
-    const rawCaption = (geminiData.candidates?.[0]?.content?.parts || [])
-      .map((p: { text?: string }) => p.text || '')
-      .join('')
-      .trim();
+    const rawCaption = result.caption;
 
     // Enforce the hard character cap regardless of what the model returned.
     const caption = capCaption(rawCaption, MAX_CAPTION_CHARS);
@@ -153,7 +207,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (!caption) {
-      console.error('[Generate Caption] Empty Gemini response:', JSON.stringify(geminiData).slice(0, 500));
+      console.error(`[Generate Caption] Empty Gemini response from key #${usedKey}`);
       return NextResponse.json(
         { error: 'Gemini returned an empty caption' },
         { status: 502 }
@@ -179,8 +233,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    console.log('[Generate Caption] ✅ Row', rowNumber, '→ column D updated');
-    return NextResponse.json({ success: true, rowNumber, caption });
+    console.log('[Generate Caption] ✅ Row', rowNumber, `→ column D updated (key #${usedKey})`);
+    return NextResponse.json({ success: true, rowNumber, caption, keyUsed: usedKey });
   } catch (error: any) {
     console.error('[Generate Caption] Error:', error?.message || error);
     return NextResponse.json(
