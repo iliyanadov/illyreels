@@ -11,6 +11,8 @@ const MAX_CAPTION_CHARS = 2200;
 // Fixed prompt prefix — the topic from column F is appended to this.
 const PROMPT_PREFIX =
   'Generate me an instagram caption, no emojis, in exactly 2 paragraphs, on this topic. ' +
+  'Before writing, you must use Google Search to look up current, accurate, up-to-date ' +
+  'information about the topic, and base the caption on what you find — do not rely on prior knowledge alone. ' +
   `Hard requirement: the entire caption must be at most ${MAX_CAPTION_CHARS - 200} characters ` +
   '(including spaces) — do not exceed this under any circumstances. Aim for roughly 1800 characters. ' +
   'Output only the caption text, nothing else. Topic:';
@@ -115,6 +117,18 @@ export async function POST(request: NextRequest) {
     }
 
     const geminiData = await geminiRes.json();
+
+    // Proof of grounding: if the model actually searched, Gemini returns the
+    // queries it ran in groundingMetadata. Log them (or warn when it skipped
+    // searching and answered from prior knowledge despite the prompt).
+    const searchQueries: string[] =
+      geminiData.candidates?.[0]?.groundingMetadata?.webSearchQueries ?? [];
+    if (searchQueries.length) {
+      console.log('[Generate Caption] Row', rowNumber, '🔎 searched:', searchQueries.join(' | '));
+    } else {
+      console.warn('[Generate Caption] Row', rowNumber, '⚠️ no web search performed — caption is ungrounded');
+    }
+
     const rawCaption = (geminiData.candidates?.[0]?.content?.parts || [])
       .map((p: { text?: string }) => p.text || '')
       .join('')
