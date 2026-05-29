@@ -118,6 +118,7 @@ function AboutChart({
   showPulse = true,
   strokeWidth = 2,
   padY = 20,
+  easing = 'easeOut',
   onPrice,
   onChangeData,
   onColor,
@@ -128,6 +129,7 @@ function AboutChart({
   showPulse?: boolean
   strokeWidth?: number
   padY?: number
+  easing?: 'easeOut' | 'easeOutSoft' | 'easeInOut' | 'linear'
   onPrice?: (p: number) => void
   onChangeData?: (d: { percentChange: number; rawChange: number }) => void
   onColor?: (c: string) => void
@@ -254,7 +256,16 @@ function AboutChart({
     startRef.current = performance.now()
     const animate = (now: number) => {
       const t = Math.min((now - startRef.current) / duration, 1)
-      const eased = 1 - Math.pow(1 - t, 3)
+      const eased =
+        easing === 'linear'
+          ? t
+          : easing === 'easeInOut'
+            ? t < 0.5
+              ? 4 * t * t * t
+              : 1 - Math.pow(-2 * t + 2, 3) / 2
+            : easing === 'easeOutSoft'
+              ? 1 - Math.pow(1 - t, 2)
+              : 1 - Math.pow(1 - t, 3)
       const colorT = Math.max(0, Math.min(1, (eased - 0.1) / 0.7))
       onColorRef.current?.(lerpRGB(C_NEUTRAL, targetCRef.current, colorT))
       const pts = pointsRef.current
@@ -576,13 +587,24 @@ function TopArtistsList({ artists }: { artists: ArtistData[] }) {
 
   useEffect(() => {
     if (!artists.length) return
+    const total = artists.length + 1
     const t = setInterval(() => {
-      setIdx((i) => (i + 1) % artists.length)
-    }, 4500)
+      setIdx((i) => (i + 1) % total)
+    }, 6750)
     return () => clearInterval(t)
   }, [artists.length])
 
   if (!artists.length) return null
+
+  // Final slide: Sonotrade logo
+  if (idx === artists.length) {
+    return (
+      <div style={{ width: '100%', padding: '0 56px', marginTop: 0 }}>
+        <LogoSlide key={`logo-${idx}`} />
+      </div>
+    )
+  }
+
   const safeIdx = idx % artists.length
   const a = artists[safeIdx]
   const first = a.data_points?.[0]?.index
@@ -596,6 +618,49 @@ function TopArtistsList({ artists }: { artists: ArtistData[] }) {
   return (
     <div style={{ width: '100%', padding: '0 56px', marginTop: 0 }}>
       <CardContent key={`${a.name}-${safeIdx}`} artist={a} change={change} />
+    </div>
+  )
+}
+
+function LogoSlide() {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'center',
+        alignItems: 'center',
+        gap: 16,
+        padding: '24px 16px',
+      }}
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src="/sonotradelogoname.png"
+        alt="Sonotrade"
+        style={{
+          height: 180,
+          width: 'auto',
+          display: 'block',
+          animation:
+            'sxArtistFadeIn 0.6s cubic-bezier(0.25,0.46,0.45,0.94) both',
+        }}
+        draggable={false}
+      />
+      <span
+        style={{
+          fontFamily: 'var(--font-geist-sans), sans-serif',
+          fontSize: 24,
+          fontWeight: 500,
+          letterSpacing: '-0.01em',
+          color: WHITE,
+          textAlign: 'center',
+          animation:
+            'sxTextPop 0.55s cubic-bezier(0.34,1.56,0.64,1) 0.7s both',
+        }}
+      >
+        Trade on your favorite artist
+      </span>
     </div>
   )
 }
@@ -615,7 +680,7 @@ function CardContent({
     <div
       style={{
         animation:
-          'sxArtistFadeIn 0.4s cubic-bezier(0.25,0.46,0.45,0.94) both',
+          'sxArtistFadeIn 0.6s cubic-bezier(0.25,0.46,0.45,0.94) both',
       }}
     >
       <span
@@ -691,10 +756,11 @@ function CardContent({
           <AboutChart
             data={artist.data_points}
             height={56}
-            duration={2200}
+            duration={4500}
             showPulse={false}
             strokeWidth={1.5}
             padY={0}
+            easing="easeOutSoft"
             onPrice={setDrawingPrice}
             onChangeData={(d) => setDrawingPercent(d.percentChange)}
           />
@@ -1345,6 +1411,10 @@ export default function LandingAnimations() {
           from { opacity: 0; transform: translateY(8px); }
           to   { opacity: 1; transform: translateY(0); }
         }
+        @keyframes sxTextPop {
+          0%   { opacity: 0; transform: translateY(14px) scale(0.92); }
+          100% { opacity: 1; transform: translateY(0) scale(1); }
+        }
       `}</style>
 
       <div style={{ maxWidth: 1300, margin: '0 auto' }}>
@@ -1366,6 +1436,12 @@ export default function LandingAnimations() {
             gap: 24,
           }}
         >
+          <Tile title="CTA animation">
+            <div style={{ width: 560 }}>
+              <TopArtistsList artists={heroArtists} />
+            </div>
+          </Tile>
+
           <Tile title="AboutChart">
             <div
               style={{
