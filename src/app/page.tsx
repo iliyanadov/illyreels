@@ -1170,6 +1170,7 @@ export default function Home() {
     let done = 0;
     let generated = 0;
     let skipped = 0;
+    let alreadyHad = 0;
     const failures: Array<{ row: number; error: string }> = [];
 
     for (let row = start; row <= end; row++) {
@@ -1191,7 +1192,8 @@ export default function Home() {
           console.error('[Generate] Row', row, 'failed:', msg);
           failures.push({ row, error: msg });
         } else if (data.skipped) {
-          skipped++;
+          if (data.reason === 'exists') alreadyHad++;
+          else skipped++;
         } else {
           generated++;
         }
@@ -1203,7 +1205,10 @@ export default function Home() {
     }
 
     setGeneratingCaptions(false);
-    let summary = `Done — ${generated} generated, ${skipped} skipped (no topic)`;
+    const parts = [`${generated} generated`];
+    if (skipped) parts.push(`${skipped} skipped (no topic)`);
+    if (alreadyHad) parts.push(`${alreadyHad} skipped (already had caption)`);
+    let summary = `Done — ${parts.join(', ')}`;
     if (failures.length) {
       const rows = failures.map(f => f.row).join(', ');
       // Show the first failure message so the user knows *why* (token expired,
@@ -2087,6 +2092,7 @@ export default function Home() {
                 <p>• Generates a caption with Gemini (web search on)</p>
                 <p>• Writes the result into <span className="text-zinc-300">column D</span></p>
                 <p>• Rows with an empty column F are skipped</p>
+                <p>• Rows that already have a caption in <span className="text-zinc-300">column D</span> are skipped</p>
               </div>
 
               {generateError && (

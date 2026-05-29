@@ -69,8 +69,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 1. Read the topic from column F (auto-refreshes the token on 401)
-    const readRange = `${encodeURIComponent(sheetName)}!F${rowNumber}`;
+    // 1. Read the existing caption (column D) and the topic (column F) in one
+    // call (auto-refreshes the token on 401). Range D:F returns [D, E, F].
+    const readRange = `${encodeURIComponent(sheetName)}!D${rowNumber}:F${rowNumber}`;
     const readUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${readRange}`;
 
     const readRes = await googleFetch(readUrl, {
@@ -79,7 +80,7 @@ export async function POST(request: NextRequest) {
 
     if (!readRes.ok) {
       const errorText = await readRes.text();
-      console.error('[Generate Caption] Failed to read column F:', errorText);
+      console.error('[Generate Caption] Failed to read columns D:F:', errorText);
       return NextResponse.json(
         { error: `Failed to read sheet: ${readRes.statusText}` },
         { status: readRes.status }
@@ -87,11 +88,19 @@ export async function POST(request: NextRequest) {
     }
 
     const readData = await readRes.json();
-    const topic = readData.values?.[0]?.[0]?.trim() || '';
+    const cols: string[] = readData.values?.[0] ?? [];
+    const existingCaption = (cols[0] ?? '').trim(); // column D
+    const topic = (cols[2] ?? '').trim();           // column F
+
+    if (existingCaption) {
+      // Column D already has a caption — don't overwrite it. Skip this row.
+      console.log('[Generate Caption] Row', rowNumber, '⏭️ already has a caption in column D — skipping');
+      return NextResponse.json({ skipped: true, reason: 'exists', rowNumber });
+    }
 
     if (!topic) {
       // Nothing to generate from — let the client mark this row as skipped.
-      return NextResponse.json({ skipped: true, rowNumber });
+      return NextResponse.json({ skipped: true, reason: 'no-topic', rowNumber });
     }
 
     // 2. Generate the caption with Gemini, grounded with Google Search
