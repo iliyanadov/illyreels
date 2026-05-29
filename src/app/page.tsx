@@ -177,6 +177,21 @@ export default function Home() {
   const [generatingCaptions, setGeneratingCaptions] = useState(false);
   const [generateProgress, setGenerateProgress] = useState('');
   const [generateError, setGenerateError] = useState('');
+  // Live per-row log for the generation run (row, status, which key served it)
+  type GenLogEntry = {
+    row: number;
+    status: 'generating' | 'done' | 'skipped' | 'failed';
+    keyUsed?: number;
+    detail?: string;
+  };
+  const [generateLog, setGenerateLog] = useState<GenLogEntry[]>([]);
+  const generateLogRef = useRef<HTMLDivElement>(null);
+
+  // Keep the live log scrolled to the newest row as it streams in.
+  useEffect(() => {
+    const el = generateLogRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [generateLog]);
 
   // Instagram state (multi-account support)
   const [igUser, setIgUser] = useState<InstagramUser | null>(null);
@@ -1172,10 +1187,25 @@ export default function Home() {
     let skipped = 0;
     let alreadyHad = 0;
     const failures: Array<{ row: number; error: string }> = [];
+    const keyCounts: Record<number, number> = {};
+
+    // Live per-row log. Maintained in a local array and mirrored to state after
+    // each change so the modal streams updates as rows complete.
+    const log: GenLogEntry[] = [];
+    setGenerateLog([]);
+    const pushLog = (entry: GenLogEntry) => {
+      log.push(entry);
+      setGenerateLog([...log]);
+    };
+    const updateLast = (patch: Partial<GenLogEntry>) => {
+      log[log.length - 1] = { ...log[log.length - 1], ...patch };
+      setGenerateLog([...log]);
+    };
 
     for (let row = start; row <= end; row++) {
       done++;
       setGenerateProgress(`Generating ${done}/${total} (row ${row})…`);
+      pushLog({ row, status: 'generating' });
       try {
         const res = await fetch('/api/google/sheets/generate-caption', {
           method: 'POST',
@@ -1191,16 +1221,25 @@ export default function Home() {
           const msg = data.error || `HTTP ${res.status}`;
           console.error('[Generate] Row', row, 'failed:', msg);
           failures.push({ row, error: msg });
+          updateLast({ status: 'failed', detail: msg });
         } else if (data.skipped) {
-          if (data.reason === 'exists') alreadyHad++;
-          else skipped++;
+          if (data.reason === 'exists') {
+            alreadyHad++;
+            updateLast({ status: 'skipped', detail: 'already had caption' });
+          } else {
+            skipped++;
+            updateLast({ status: 'skipped', detail: 'no topic' });
+          }
         } else {
           generated++;
+          if (data.keyUsed) keyCounts[data.keyUsed] = (keyCounts[data.keyUsed] || 0) + 1;
+          updateLast({ status: 'done', keyUsed: data.keyUsed });
         }
       } catch (error: any) {
         const msg = error?.message || 'Network error';
         console.error('[Generate] Row', row, msg);
         failures.push({ row, error: msg });
+        updateLast({ status: 'failed', detail: msg });
       }
     }
 
@@ -1209,6 +1248,10 @@ export default function Home() {
     if (skipped) parts.push(`${skipped} skipped (no topic)`);
     if (alreadyHad) parts.push(`${alreadyHad} skipped (already had caption)`);
     let summary = `Done — ${parts.join(', ')}`;
+    const keyParts = Object.keys(keyCounts)
+      .sort()
+      .map(k => `key #${k}: ${keyCounts[Number(k)]}`);
+    if (keyParts.length) summary += ` [${keyParts.join(', ')}]`;
     if (failures.length) {
       const rows = failures.map(f => f.row).join(', ');
       // Show the first failure message so the user knows *why* (token expired,
@@ -2104,6 +2147,31 @@ export default function Home() {
               {generateProgress && (
                 <div className="rounded-lg border border-purple-800 bg-purple-950/30 px-3 py-2 text-xs text-purple-300">
                   {generateProgress}
+                </div>
+              )}
+
+              {generateLog.length > 0 && (
+                <div
+                  ref={generateLogRef}
+                  className="max-h-48 overflow-y-auto rounded-lg border border-zinc-800 bg-zinc-950/60 px-3 py-2 text-xs font-mono space-y-0.5"
+                >
+                  {generateLog.map((e, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <span className="w-16 shrink-0 text-zinc-500">Row {e.row}</span>
+                      {e.status === 'generating' && (
+                        <span className="text-purple-300">⏳ generating…</span>
+                      )}
+                      {e.status === 'done' && (
+                        <span className="text-green-400">✓ generated · key #{e.keyUsed ?? '?'}</span>
+                      )}
+                      {e.status === 'skipped' && (
+                        <span className="text-zinc-400">⏭ skipped — {e.detail}</span>
+                      )}
+                      {e.status === 'failed' && (
+                        <span className="truncate text-red-400">✕ {e.detail}</span>
+                      )}
+                    </div>
+                  ))}
                 </div>
               )}
 
