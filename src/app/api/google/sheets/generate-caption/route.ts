@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getGoogleToken, googleFetch } from '@/lib/google-token-storage';
 
 export const runtime = 'nodejs';
+// A grounded Gemini call (Google Search) plus two Sheets calls can take well
+// over the default timeout, which surfaces as a Vercel platform 500. Give it
+// generous headroom so a single row never gets killed mid-request.
+export const maxDuration = 60;
 
 // Instagram's hard caption limit is 2200 chars. We aim well under it in the
 // prompt and enforce it as a hard cap below, since the model can't reliably

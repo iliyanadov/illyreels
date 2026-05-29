@@ -1189,6 +1189,20 @@ export default function Home() {
     const failures: Array<{ row: number; error: string }> = [];
     const keyCounts: Record<number, number> = {};
 
+    // Coerce any error shape to a string. Server / platform errors can come back
+    // as an object (e.g. Vercel's { code, id, message } envelope on a timeout);
+    // rendering one of those directly would crash React, so always stringify.
+    const toErrorText = (err: unknown, fallback: string): string => {
+      if (typeof err === 'string' && err.trim()) return err;
+      if (err && typeof err === 'object') {
+        const o = err as { message?: unknown; code?: unknown };
+        if (typeof o.message === 'string' && o.message) return o.message;
+        if (typeof o.code === 'string' && o.code) return o.code;
+        try { return JSON.stringify(err); } catch { /* fall through */ }
+      }
+      return fallback;
+    };
+
     // Live per-row log. Maintained in a local array and mirrored to state after
     // each change so the modal streams updates as rows complete.
     const log: GenLogEntry[] = [];
@@ -1216,9 +1230,9 @@ export default function Home() {
             rowNumber: row,
           }),
         });
-        const data = await res.json();
+        const data = await res.json().catch(() => ({} as any));
         if (!res.ok) {
-          const msg = data.error || `HTTP ${res.status}`;
+          const msg = toErrorText(data?.error, `HTTP ${res.status}`);
           console.error('[Generate] Row', row, 'failed:', msg);
           failures.push({ row, error: msg });
           updateLast({ status: 'failed', detail: msg });
