@@ -302,9 +302,27 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
 
   // Clear video error when videoSrc changes and set up loading state
   useEffect(() => {
-    // Skip if videoSrc is empty or doesn't contain a real URL
+    // Empty/invalid URL (the row's download returned a blank play URL) — NEVER
+    // leave a silent blank canvas. Re-mint a fresh URL once; if there's still
+    // none, surface a clear error overlay instead of a void.
     if (!videoSrc || !videoSrc.includes('url=') || videoSrc.endsWith('url=')) {
-      setIsVideoLoading(false);
+      const refetch = onRefetchSrcRef.current;
+      if (!hasRefetchedRef.current && refetch) {
+        hasRefetchedRef.current = true;
+        setVideoError(null);
+        setIsVideoLoading(true);
+        console.warn('[Row ' + (rowNumber + 1) + '] Empty video URL — re-minting a fresh one');
+        // On success the parent updates entry.data → videoSrc changes → this
+        // effect re-runs with the fresh URL. On failure, show an error.
+        refetch().catch((e) => {
+          console.error('[Row ' + (rowNumber + 1) + '] Empty-URL refetch failed:', e);
+          setIsVideoLoading(false);
+          setVideoError('Could not load this video. Try fetching it again.');
+        });
+      } else {
+        setIsVideoLoading(false);
+        setVideoError('No playable video for this row — the source may be a photo post or unavailable.');
+      }
       return;
     }
 
