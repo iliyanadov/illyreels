@@ -404,6 +404,8 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
 
       console.error(`[Row ${rowNumber + 1}] Video ${videoId} permanently failed after retries`);
       setIsVideoLoading(false);
+      setVideoError('Video failed to load after several tries.');
+      if (onVideoError) onVideoError();
     };
 
     video.addEventListener('loadeddata', handleLoadedData);
@@ -416,13 +418,13 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
         console.error('[Row ' + (rowNumber + 1) + '] Video loading timeout for videoId:', videoId);
         console.error('[Row ' + (rowNumber + 1) + '] Video src (first 200 chars):', videoSrc.substring(0, Math.min(200, videoSrc.length)));
         console.error('[Row ' + (rowNumber + 1) + '] ReadyState:', video.readyState, 'NetworkState:', video.networkState);
-        setVideoError('Video failed to load. The video URL may be invalid.');
+        setVideoError('Video failed to load — it may be slow or unavailable.');
         setIsVideoLoading(false);
         if (onVideoError) {
           onVideoError();
         }
       }
-    }, 120000); // 2 minutes - some TikTok CDN responses are very slow
+    }, 45000); // fail fast (was 2min) so a stuck load shows an error + Retry instead of hanging
 
     return () => {
       clearTimeout(timeoutId);
@@ -2504,7 +2506,28 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
                 <line x1="12" y1="16" x2="12.01" y2="16"/>
               </svg>
               <p className="text-red-400 text-sm font-medium">{videoError}</p>
-              <p className="text-zinc-500 text-xs mt-1">Try fetching the video again</p>
+              <button
+                onClick={() => {
+                  // One-click recovery: reset guards, re-mint a fresh URL, reload.
+                  retryCountRef.current = 0;
+                  hasRefetchedRef.current = false;
+                  setVideoError(null);
+                  setIsVideoLoading(true);
+                  const refetch = onRefetchSrcRef.current;
+                  if (refetch) {
+                    refetch().catch(() => {
+                      setIsVideoLoading(false);
+                      setVideoError('Still could not load — the source may be unavailable.');
+                    });
+                  } else {
+                    const v = videoRef.current;
+                    if (v) { v.src = videoSrc; v.load(); }
+                  }
+                }}
+                className="mt-3 rounded-lg bg-white/10 hover:bg-white/20 px-4 py-1.5 text-xs font-semibold text-white transition-colors"
+              >
+                Retry
+              </button>
             </div>
           </div>
         )}

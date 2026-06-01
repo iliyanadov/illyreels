@@ -345,11 +345,21 @@ export default function Home() {
     const entry = entriesRef.current.find(e => e.id === id);
     if (!entry?.url?.trim()) return null;
     console.log('[Refetch] Fetching fresh URL for entry:', id, entry.url);
-    const res = await fetch('/api/download', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: entry.url.trim() }),
-    });
+    // Bound the re-mint so the canvas spinner can't hang if /api/download stalls
+    // or the connection drops (the route maxDuration is 60s; allow a little more).
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 65000);
+    let res: Response;
+    try {
+      res = await fetch('/api/download', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: entry.url.trim() }),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
     if (!res.ok) {
       console.error('[Refetch] /api/download failed:', res.status);
       throw new Error(`Refetch failed: ${res.status}`);
