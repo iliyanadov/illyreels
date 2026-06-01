@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { fetchWithTimeout, isAbortError } from '@/lib/fetch-timeout'
 
 const BACKEND_URL = process.env.BACKEND_URL || 'https://indextrading-production.up.railway.app'
 
@@ -11,7 +12,7 @@ export async function GET(
 
     const backendUrl = new URL(`/api/artist/${encodeURIComponent(spotify_id)}`, BACKEND_URL)
 
-    const response = await fetch(backendUrl.toString(), {
+    const response = await fetchWithTimeout(backendUrl.toString(), {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
@@ -39,6 +40,12 @@ export async function GET(
     return NextResponse.json(data)
   } catch (error) {
     console.error('Proxy error:', error)
+    if (isAbortError(error)) {
+      return NextResponse.json(
+        { error: 'Backend request timed out. Please try again.' },
+        { status: 504 }
+      )
+    }
     return NextResponse.json(
       { error: 'Failed to connect to backend service' },
       { status: 500 }

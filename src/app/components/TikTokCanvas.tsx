@@ -105,11 +105,12 @@ interface Props {
   rowNumber?: number; // Row number for ordered exports
   queuePosition?: number; // Position in upload queue (undefined = not queued)
   onVideoError?: () => void; // Callback when video fails to load
-  onRefetchSrc?: () => Promise<void>; // Re-mint a fresh URL via /api/download (parent updates videoSrc prop)
+  onRefetchSrc?: () => Promise<string | null | void>; // Re-mint a fresh URL via /api/download (parent updates videoSrc prop; returns the fresh raw URL for in-flight retries)
   onExportComplete?: (blob: Blob, filename: string) => void | Promise<void>; // Callback after export
   onUploadToInstagram?: (blob: Blob, filename: string) => void | Promise<void>; // Callback to upload to Instagram (called after render)
   onUploadRequest?: (entryId: string) => void; // Callback when upload button is clicked (before render)
   igConnected?: boolean; // Whether Instagram is connected
+  uploadState?: 'idle' | 'queued' | 'uploading' | 'published'; // Drives the Upload button disabled state + label (duplicate-publish guard)
   brand?: 'sonotrade' | 'forum' | 'culturesparadox' | 'empty';
   overlayLogoSrc?: string;
   overlayChange?: string;
@@ -141,6 +142,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
   onUploadToInstagram,
   onUploadRequest,
   igConnected = false,
+  uploadState = 'idle',
   brand = 'sonotrade',
   overlayLogoSrc = '/templatelogo.png',
   overlayChange = '',
@@ -194,6 +196,10 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
   // Retry state — resets on every videoSrc change; refetch flag resets per videoId
   const retryCountRef = useRef(0);
   const hasRefetchedRef = useRef(false);
+  // Tracks whether the draw loop has painted a real video frame yet. The
+  // loading spinner is cleared on first paint (not on `loadeddata`), so a
+  // stalled seek never leaves a black canvas that looks finished.
+  const firstFramePaintedRef = useRef(false);
   const onRefetchSrcRef = useRef(onRefetchSrc);
   useEffect(() => { onRefetchSrcRef.current = onRefetchSrc; }, [onRefetchSrc]);
   useEffect(() => { hasRefetchedRef.current = false; }, [videoId]);
@@ -307,6 +313,17 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     setVideoError(null);
     setIsVideoLoading(true);
     retryCountRef.current = 0;
+    // New source: reset the first-paint gate and clear the canvas to black so we
+    // don't show the previous video's last frame while this one loads.
+    firstFramePaintedRef.current = false;
+    {
+      const c = canvasRef.current;
+      const cx = c?.getContext('2d');
+      if (cx) {
+        cx.fillStyle = '#000';
+        cx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+      }
+    }
 
     const video = videoRef.current;
     if (!video) {
@@ -326,7 +343,10 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     const handleLoadedData = () => {
       if (video.readyState >= 2) {
         console.log('[Row ' + (rowNumber + 1) + `] Video ${videoId} loaded data, readyState:`, video.readyState);
-        setIsVideoLoading(false);
+        // NOTE: intentionally do NOT hide the spinner here. `loadeddata` fires at
+        // t=0 before the seek-to-1s lands; if that seek stalls the canvas would be
+        // black with no spinner. The spinner is cleared on the first painted frame
+        // in the draw loop instead (with the load-timeout below as a backstop).
       }
     };
 
@@ -1100,9 +1120,16 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     function draw() {
       if (!active) return;
       raf.current = requestAnimationFrame(draw);
+      // Only repaint when the video actually has a frame to show. Repainting
+      // black while buffering or mid-seek is what caused the black-canvas flash;
+      // when not drawable we leave the last good frame (or the initial black
+      // clear) in place, and the loading spinner stays up until first paint.
+      if (!(video.readyState >= 2 && video.videoWidth && video.videoHeight)) {
+        return;
+      }
       ctx.fillStyle = '#000';
       ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
-      if (video.readyState >= 2 && video.videoWidth && video.videoHeight) {
+      {
         const { x, y, w, h } = boxRef.current;
         const { x: ox, y: oy } = videoOffsetRef.current;
 
@@ -1152,6 +1179,13 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
           } else if (brand !== 'empty') {
             drawMarketCardOnContext({ ctx, boxY: y + h + 30 });
           }
+        }
+
+        // First real frame painted — clear the loading state here (gated on an
+        // actual paint rather than `loadeddata`, which fired before the seek).
+        if (!firstFramePaintedRef.current) {
+          firstFramePaintedRef.current = true;
+          setIsVideoLoading(false);
         }
       }
     }
@@ -1495,18 +1529,65 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
       console.log('[startRecording] Video URL:', videoUrl);
       setRecStatus('Downloading video file...');
 
-      // Fetch the video file as ArrayBuffer
-      let arrayBuffer: ArrayBuffer;
-      try {
-        const response = await fetch(videoUrl);
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      // Fetch the video bytes. For each candidate URL try the direct CDN fetch
+      // first (mp4box-friendly), then the proxy (which adds the Referer/UA the
+      // TikTok CDN requires) if the direct fetch is hotlink-rejected (403). Each
+      // source gets one quick retry, validates a non-empty/untruncated body, and
+      // respects the export abort signal.
+      let lastFetchError: unknown = null;
+      const buildByteSources = (raw: string): string[] =>
+        raw.startsWith('/api/proxy')
+          ? [raw]
+          : [raw, `/api/proxy?stream=1&url=${encodeURIComponent(raw)}`];
+
+      const tryFetchBytes = async (sources: string[]): Promise<ArrayBuffer | null> => {
+        for (const src of sources) {
+          for (let attempt = 0; attempt < 2; attempt++) {
+            if (signal.aborted) throw new Error('Cancelled');
+            try {
+              const response = await fetch(src, { signal });
+              if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+              const buf = await response.arrayBuffer();
+              if (buf.byteLength === 0) throw new Error('Empty video body');
+              const expected = Number(response.headers.get('Content-Length') || 0);
+              if (expected > 0 && buf.byteLength < expected) {
+                throw new Error(`Truncated video body (${buf.byteLength}/${expected} bytes)`);
+              }
+              console.log('[startRecording] Video fetched, size:', buf.byteLength, src.startsWith('/api/proxy') ? '(via proxy)' : '(direct)');
+              return buf;
+            } catch (fetchError) {
+              // Propagate a real cancellation immediately; otherwise record and retry.
+              if (signal.aborted || (fetchError as any)?.name === 'AbortError') throw fetchError;
+              lastFetchError = fetchError;
+              console.warn('[startRecording] Byte fetch failed', { via: src.startsWith('/api/proxy') ? 'proxy' : 'direct', attempt }, fetchError);
+              if (attempt === 0) await new Promise((r) => setTimeout(r, 400));
+            }
+          }
         }
-        arrayBuffer = await response.arrayBuffer();
-        console.log('[startRecording] Video fetched, size:', arrayBuffer.byteLength);
-      } catch (fetchError) {
-        console.error('[startRecording] Fetch error:', fetchError);
-        throw new Error(`Failed to download video: ${fetchError instanceof Error ? fetchError.message : 'Unknown error'}`);
+        return null;
+      };
+
+      let arrayBuffer: ArrayBuffer | null = await tryFetchBytes(buildByteSources(videoUrl));
+
+      // If every source failed, the signed CDN token has likely expired (the
+      // proxy can't re-sign it). Re-mint a fresh URL once and retry — this is the
+      // primary recovery for "the link works but fetch fails" at export time.
+      if (!arrayBuffer && onRefetchSrcRef.current) {
+        console.warn('[startRecording] All byte sources failed — re-minting a fresh URL and retrying');
+        try {
+          const fresh = await onRefetchSrcRef.current();
+          if (typeof fresh === 'string' && fresh) {
+            videoUrl = fresh;
+            arrayBuffer = await tryFetchBytes(buildByteSources(fresh));
+          }
+        } catch (e) {
+          console.error('[startRecording] Re-mint failed:', e);
+        }
+      }
+
+      if (!arrayBuffer) {
+        console.error('[startRecording] Fetch error:', lastFetchError);
+        throw new Error(`Failed to download video: ${lastFetchError instanceof Error ? lastFetchError.message : 'Unknown error'}`);
       }
 
       // Demux with mp4box.js
@@ -1520,6 +1601,12 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
       let audioTrackId: number | null = null;
       let videoTimescale = 90000;
       let audioTimescale = 44100;
+      // Real codec + coded dimensions parsed from the track. The decoder used to
+      // be hardcoded to avc1.64001F / 1080x1920, which silently produced a black
+      // video for any other format; we now derive these from the actual track.
+      let videoCodec = '';
+      let videoCodedWidth = 0;
+      let videoCodedHeight = 0;
       let samplesReady = false;
       let audioDecoderConfig: Uint8Array | null = null; // AAC AudioSpecificConfig
 
@@ -1534,6 +1621,12 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
           if (track.type === 'video' && !videoTrackId) {
             videoTrackId = track.id;
             videoTimescale = track.timescale || 90000;
+            // Capture the REAL codec + dimensions so the decoder isn't pinned to
+            // 1080x1920/High-profile (the cause of black exports for other formats).
+            videoCodec = track.codec || '';
+            videoCodedWidth = track.video?.width || track.track_width || 0;
+            videoCodedHeight = track.video?.height || track.track_height || 0;
+            console.log('[startRecording] Track video codec/dims:', videoCodec, `${videoCodedWidth}x${videoCodedHeight}`);
           }
           if (track.type === 'audio' && !audioTrackId) {
             audioTrackId = track.id;
@@ -1743,6 +1836,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
       const decodedFrames: Array<{ frame: VideoFrame; timestamp: number }> = [];
       let decodeIndex = 0;
 
+      let decodeError: Error | null = null;
       const decoder = new VideoDecoder({
         output: (frame: VideoFrame) => {
           decodedFrames.push({ frame, timestamp: frame.timestamp / 1_000_000 });
@@ -1750,6 +1844,8 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
         },
         error: (e: Error) => {
           console.error('[VideoDecoder] error:', e);
+          // Remember the failure so we can abort instead of emitting black frames.
+          decodeError = e;
         },
       });
 
@@ -1876,15 +1972,26 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
       // Configure decoder with the proper codec string and description
       // The codec is avc1.64001f which means H.264 High Profile Level 3.1
       const decoderConfig: VideoDecoderConfig = {
-        codec: 'avc1.64001F',
-        codedWidth: 1080,
-        codedHeight: 1920,
+        // Use the real codec + dimensions parsed from the track; fall back to the
+        // previous hardcoded H.264 High@3.1 / 1080x1920 only when unknown.
+        codec: videoCodec || 'avc1.64001F',
+        codedWidth: videoCodedWidth || 1080,
+        codedHeight: videoCodedHeight || 1920,
         // @ts-ignore - description is required for AVC H.264
         description: description,
       };
+      console.log('[startRecording] Decoder config:', decoderConfig.codec, `${decoderConfig.codedWidth}x${decoderConfig.codedHeight}`);
 
       const isSupported = await VideoDecoder.isConfigSupported(decoderConfig);
       console.log('[startRecording] Decoder config supported:', isSupported.supported);
+      // Don't proceed with an unsupported config — that path silently yields a
+      // black video. Fail with an actionable error instead.
+      if (!isSupported.supported) {
+        decoder.close();
+        throw new Error(
+          `This video can't be exported: its format isn't supported by your browser (codec ${decoderConfig.codec}, ${decoderConfig.codedWidth}x${decoderConfig.codedHeight}).`
+        );
+      }
 
       decoder.configure(decoderConfig);
 
@@ -1906,10 +2013,31 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
         setRecProgress(0.1 + (i / videoSamples.length) * 0.3);
       }
 
-      await decoder.flush();
+      try {
+        await decoder.flush();
+      } catch (e) {
+        // A decode error rejects flush(); capture it so we surface the friendly
+        // message below instead of the raw WebCodecs rejection.
+        if (!decodeError) decodeError = e as Error;
+      }
       decoder.close();
 
       console.log('[startRecording] Decoded frames:', decodedFrames.length);
+
+      // Fail loudly instead of silently exporting a black video when decoding
+      // errored or produced no frames (e.g. an unsupported codec/profile).
+      if (decodeError || decodedFrames.length === 0) {
+        // Release any frames already decoded before bailing out.
+        for (const { frame } of decodedFrames) {
+          try { frame.close(); } catch {}
+        }
+        if (decodeError) {
+          throw new Error(
+            `Video decoding failed (${(decodeError as Error).message || 'unknown error'}). The video format may be unsupported.`
+          );
+        }
+        throw new Error('No video frames could be decoded — refusing to export a black video. The video format is likely unsupported.');
+      }
 
       setRecStatus('Preparing audio...');
 
@@ -2492,18 +2620,27 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
       {/* Upload to Instagram button */}
       {!isRecording && !isUploadMode && igConnected && (
         <button
+          disabled={uploadState !== 'idle'}
           onClick={() => {
+            // Guard against duplicate publishes from repeated clicks.
+            if (uploadState !== 'idle') return;
             // Call parent to add to queue (rendering will happen when it's our turn)
             if (onUploadRequest) {
               onUploadRequest(entryId ?? videoId ?? 'unknown');
             }
           }}
-          className="flex items-center gap-2 rounded-lg bg-gradient-to-r from-purple-500 via-pink-500 to-orange-400 px-5 py-2.5 text-xs font-semibold text-white hover:opacity-90 transition-opacity"
+          className="flex items-center gap-2 rounded-lg bg-gradient-to-r from-purple-500 via-pink-500 to-orange-400 px-5 py-2.5 text-xs font-semibold text-white hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
             <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/>
           </svg>
-          Upload Reel
+          {uploadState === 'published'
+            ? 'Published'
+            : uploadState === 'uploading'
+              ? 'Uploading…'
+              : uploadState === 'queued'
+                ? 'Queued…'
+                : 'Upload Reel'}
         </button>
       )}
 

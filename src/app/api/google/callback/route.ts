@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { google } from 'googleapis';
-import { setGoogleToken } from '@/lib/google-token-storage';
+import { setGoogleToken, GoogleAuthError } from '@/lib/google-token-storage';
+import { isAbortError } from '@/lib/fetch-timeout';
 
 export const runtime = 'nodejs';
 
@@ -50,6 +51,17 @@ export async function GET(request: NextRequest) {
 
   } catch (error: any) {
     console.error('[Google Callback] Token exchange error:', error?.message || error);
+
+    // This route renders a user-facing HTML page (it is the OAuth redirect
+    // target, not a JSON API the client parses), so we keep returning an error
+    // page but tailor the message for the auth/timeout cases.
+    if (error instanceof GoogleAuthError) {
+      return errorPage('Please reconnect your Google account.');
+    }
+    if (isAbortError(error)) {
+      return errorPage('Google request timed out. Please try again.');
+    }
+
     return errorPage(error?.message || 'Token exchange failed');
   }
 }

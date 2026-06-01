@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getMetaToken, getIgUserId, getIgAccessToken } from '@/lib/meta-token-storage';
+import { fetchWithTimeout, isAbortError } from '@/lib/fetch-timeout';
 
 export const runtime = 'nodejs';
 
@@ -22,7 +23,8 @@ export async function GET(request: NextRequest) {
 
     console.log('[Publishing Limit] Fetching for IG User ID:', igUserId);
 
-    const response = await fetch(url.toString());
+    // 12s upstream timeout so a hung Graph API call can't consume the whole budget.
+    const response = await fetchWithTimeout(url.toString(), {}, 12000);
 
     if (!response.ok) {
       const error = await response.text();
@@ -60,6 +62,14 @@ export async function GET(request: NextRequest) {
     });
   } catch (error: any) {
     console.error('[Publishing Limit] Error:', error?.message || error);
+
+    if (isAbortError(error)) {
+      return NextResponse.json(
+        { error: 'Upstream timed out. Please try again.' },
+        { status: 504 }
+      );
+    }
+
     return NextResponse.json(
       { error: error?.message || 'Failed to fetch publishing limit' },
       { status: 500 }

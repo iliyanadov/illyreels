@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getMetaToken, updateMetaToken } from '@/lib/meta-token-storage';
+import { fetchWithTimeout, isAbortError } from '@/lib/fetch-timeout';
 
 export const runtime = 'nodejs';
 
@@ -19,9 +20,15 @@ async function getInstagramUser(accessToken: string): Promise<InstagramUser> {
   url.searchParams.set('fields', 'id,username,account_type');
   url.searchParams.set('access_token', accessToken);
 
-  console.log('[Instagram Me] Fetching from:', url.toString());
+  // Redact the access_token before logging the full Graph URL.
+  const redactedUrl = url.toString().replace(
+    encodeURIComponent(accessToken),
+    'REDACTED'
+  );
+  console.log('[Instagram Me] Fetching from:', redactedUrl);
 
-  const response = await fetch(url.toString());
+  // 12s upstream timeout so a hung Graph API call can't consume the whole budget.
+  const response = await fetchWithTimeout(url.toString(), {}, 12000);
 
   if (!response.ok) {
     const error = await response.text();
@@ -74,6 +81,13 @@ export async function GET(request: NextRequest) {
     });
   } catch (error: any) {
     console.error('[Instagram Me] Error:', error?.message || error);
+
+    if (isAbortError(error)) {
+      return NextResponse.json(
+        { error: 'Upstream timed out. Please try again.' },
+        { status: 504 }
+      );
+    }
 
     return NextResponse.json(
       { error: error?.message || 'Failed to fetch Instagram user info' },

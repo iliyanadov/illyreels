@@ -42,6 +42,7 @@ interface VideoData {
   duration: number;
   size: number;
   images?: string[];  // for photo/image posts
+  publishedMediaId?: string; // Instagram media id after a successful publish (dedup guard)
 }
 
 interface Market {
@@ -113,24 +114,9 @@ interface VideoEntry {
   queuePosition?: number; // Position in upload queue (0 = currently processing, undefined = not in queue)
 }
 
-function formatBytes(bytes: number): string {
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function proxyUrl(url: string, filename: string): string {
-  return `/api/proxy?url=${encodeURIComponent(url)}&filename=${encodeURIComponent(filename)}`;
-}
-
 function proxyStreamUrl(url: string): string {
   // Properly encode the URL for the query parameter
   return `/api/proxy?stream=1&url=${encodeURIComponent(url)}`;
-}
-
-function formatDuration(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  return `${m}:${String(s).padStart(2, '0')}`;
 }
 
 // Tag to Event ID mapping
@@ -213,6 +199,10 @@ export default function Home() {
   // Instagram upload queue (ensures only one render+upload at a time)
   const uploadQueueRef = useRef<Array<string>>([]);
   const isProcessingUploadRef = useRef(false);
+  // The entry id currently being rendered+published (fresh, ref-based so async
+  // code reads it without a stale closure). Used to dedupe enqueues and to mark
+  // queue positions correctly.
+  const processingEntryIdRef = useRef<string | null>(null);
 
   // Mirror of `entries` for use in callbacks that need fresh state outside the render closure
   const entriesRef = useRef<VideoEntry[]>([]);
@@ -226,6 +216,10 @@ export default function Home() {
   const [bulkUploadTotal, setBulkUploadTotal] = useState(0);
   const [bulkUploadCompleted, setBulkUploadCompleted] = useState(0);
   const bulkUploadAbortRef = useRef(false);
+  // Mirror of bulkUploadPaused for reads inside the long-running upload loop —
+  // the state value is captured stale in that async closure, so the loop must
+  // read the ref or "Pause" never actually pauses.
+  const bulkUploadPausedRef = useRef(false);
 
   // Check for OAuth tokens on mount
   useEffect(() => {
@@ -297,10 +291,14 @@ export default function Home() {
       if (res.ok) {
         // Google is connected - set a placeholder token
         setGoogleToken({ accessToken: 'connected' });
+      } else if (res.status === 401 || res.status === 403) {
+        // Explicitly unauthenticated → clear. Other non-OK (5xx/transient) is
+        // left as-is so a server blip doesn't silently disconnect Sheets.
+        setGoogleToken(null);
       }
     } catch (error) {
-      // Not connected
-      setGoogleToken(null);
+      // Network blip — keep whatever token state we had rather than logging out.
+      console.warn('[Google] connection check failed (transient, keeping state):', error);
     }
   }
 
@@ -340,10 +338,12 @@ export default function Home() {
   }
 
   // Re-mint a fresh download URL for an entry (e.g., when its rapidcdn JWT has aged out).
-  // Updates entry.data with the new payload — the canvas's videoSrc prop will change reactively.
-  async function refetchEntrySrc(id: string): Promise<void> {
+  // Updates entry.data with the new payload — the canvas's videoSrc prop will change
+  // reactively — AND returns the fresh raw play URL so an in-flight export can retry
+  // with it directly (the prop change can't reach a function that's already running).
+  async function refetchEntrySrc(id: string): Promise<string | null> {
     const entry = entriesRef.current.find(e => e.id === id);
-    if (!entry?.url?.trim()) return;
+    if (!entry?.url?.trim()) return null;
     console.log('[Refetch] Fetching fresh URL for entry:', id, entry.url);
     const res = await fetch('/api/download', {
       method: 'POST',
@@ -357,62 +357,17 @@ export default function Home() {
     const json = await res.json();
     setEntries(prev => prev.map(e => e.id === id ? { ...e, data: json } : e));
     console.log('[Refetch] ✅ Fresh URL applied for entry:', id);
+    return json.play || json.hdplay || json.wmplay || null;
   }
 
   function updateEntry(id: string, field: 'url' | 'caption' | 'tag' | 'change' | 'instagramCaption', value: string) {
     setEntries(prevEntries => prevEntries.map(e => e.id === id ? { ...e, [field]: value } : e));
   }
 
-  async function fetchMarket(id: string) {
-    // Get the tag BEFORE any state updates
-    const entry = entries.find(e => e.id === id);
-    if (!entry || !entry.tag.trim()) return;
-
-    const tag = entry.tag.trim().toLowerCase();
-    const eventId = TAG_TO_EVENT_ID[tag];
-
-    if (!eventId) {
-      setEntries(prevEntries => prevEntries.map(e =>
-        e.id === id ? { ...e, loadingMarket: false, marketError: `Unknown tag: ${tag}` } : e
-      ));
-      return;
-    }
-
-    console.log('Fetching market for tag:', tag, '→ eventId:', eventId);
-
-    // Set loading state
-    setEntries(prevEntries => prevEntries.map(e =>
-      e.id === id ? { ...e, loadingMarket: true, marketError: '', marketData: null, videoFailed: false } : e
-    ));
-
-    try {
-      // Use our Next.js API route to avoid CORS issues
-      const res = await fetch(`/api/market?eventId=${encodeURIComponent(eventId)}&withNestedMarkets=true`);
-
-      console.log('Response status:', res.status);
-
-      const json = await res.json();
-      console.log('Response data:', json);
-
-      setEntries(prevEntries => prevEntries.map(e =>
-        e.id === id ? {
-          ...e,
-          loadingMarket: false,
-          marketError: res.ok ? '' : (json.error || json.message || `Error ${res.status}: Failed to fetch market data`),
-          marketData: res.ok ? json : null
-        } : e
-      ));
-    } catch (error) {
-      console.error('Fetch error:', error);
-      setEntries(prevEntries => prevEntries.map(e =>
-        e.id === id ? { ...e, loadingMarket: false, marketError: 'Network error — please try again' } : e
-      ));
-    }
-  }
-
   async function fetchVideo(id: string) {
-    // Get current entry data before any async operations
-    const currentEntry = entries.find(e => e.id === id);
+    // Get current entry data before any async operations (read the ref so the
+    // sequential bulk-fetch loop sees fresh state, not a stale render closure)
+    const currentEntry = entriesRef.current.find(e => e.id === id);
 
     if (!currentEntry || !currentEntry.url.trim()) {
       setEntries(prev => prev.map(e =>
@@ -460,7 +415,7 @@ export default function Home() {
     }
 
     // Fetch market data if tag is present (skip in forum mode)
-    const entry = entries.find(e => e.id === id);
+    const entry = entriesRef.current.find(e => e.id === id);
     if (brandMode !== 'forum' && entry?.tag.trim()) {
       const tag = entry.tag.trim().toLowerCase();
       const eventId = TAG_TO_EVENT_ID[tag];
@@ -540,8 +495,12 @@ export default function Home() {
   }
 
   async function uploadAllToInstagram() {
-    // Get all entries with fetched video data
-    const entriesToUpload = entries.filter(e => e.data && !e.loading && !(e.data.images && e.data.images.length > 0));
+    // Get all entries with fetched video data that haven't been published yet.
+    const entriesToUpload = entries.filter(e =>
+      e.data && !e.loading &&
+      !(e.data.images && e.data.images.length > 0) &&
+      !e.instagramPermalink && !e.data.publishedMediaId
+    );
 
     if (entriesToUpload.length === 0) {
       setBulkUploadStatus('No videos to upload');
@@ -550,6 +509,7 @@ export default function Home() {
 
     // Reset state
     bulkUploadAbortRef.current = false;
+    bulkUploadPausedRef.current = false;
     setBulkUploading(true);
     setBulkUploadPaused(false);
     setBulkUploadCompleted(0);
@@ -568,8 +528,8 @@ export default function Home() {
         return;
       }
 
-      // Wait while paused
-      while (bulkUploadPaused && !bulkUploadAbortRef.current) {
+      // Wait while paused (read the ref, not the stale-closure state value)
+      while (bulkUploadPausedRef.current && !bulkUploadAbortRef.current) {
         await new Promise(resolve => setTimeout(resolve, 100));
       }
 
@@ -613,15 +573,19 @@ export default function Home() {
   function toggleBulkUploadPause() {
     setBulkUploadPaused(prev => {
       const newValue = !prev;
+      bulkUploadPausedRef.current = newValue;
       setBulkUploadStatus(newValue ? 'Paused' : `Uploading video ${bulkUploadCompleted + 1} of ${bulkUploadTotal}...`);
       return newValue;
     });
   }
 
   function cancelBulkUpload() {
+    // Signal abort but DON'T clear bulkUploading here — the loop clears it once
+    // the in-flight upload settles, so per-row buttons stay disabled and can't
+    // race the still-running upload.
     bulkUploadAbortRef.current = true;
+    bulkUploadPausedRef.current = false;
     setBulkUploadStatus('Cancelling...');
-    setBulkUploading(false);
     setBulkUploadPaused(false);
   }
 
@@ -727,6 +691,7 @@ export default function Home() {
 
     isProcessingUploadRef.current = true;
     const entryId = uploadQueueRef.current.shift()!;
+    processingEntryIdRef.current = entryId;
     console.log('[Queue] Processing entry:', entryId, 'remaining:', uploadQueueRef.current.length);
 
     // Update queue positions for remaining items
@@ -753,6 +718,7 @@ export default function Home() {
     }
 
     isProcessingUploadRef.current = false;
+    processingEntryIdRef.current = null;
 
     // Process next in queue if any
     if (uploadQueueRef.current.length > 0) {
@@ -769,7 +735,7 @@ export default function Home() {
       const queueIndex = uploadQueueRef.current.indexOf(e.id);
       if (queueIndex !== -1) {
         return { ...e, queuePosition: queueIndex + 1 };
-      } else if (e.id === uploadingEntry) {
+      } else if (e.id === processingEntryIdRef.current) {
         return { ...e, queuePosition: 0 }; // Currently processing
       } else {
         return { ...e, queuePosition: undefined };
@@ -778,8 +744,27 @@ export default function Home() {
   }
 
   async function processSingleUpload(entryId: string, blob: Blob, filename: string) {
-    const entry = entries.find(e => e.id === entryId);
+    // Read fresh state (this runs after a multi-minute render; the render-closure
+    // `entries` would be stale for caption / sheetRow / published status).
+    const entry = entriesRef.current.find(e => e.id === entryId);
     if (!entry) return;
+    // Never re-publish something that already went out.
+    if (entry.instagramPermalink || entry.data?.publishedMediaId) {
+      console.log('[Upload] Skipping — entry already published:', entryId);
+      return;
+    }
+
+    // Deterministic idempotency key derived from the entry + its content, so a
+    // retry — including the "publish succeeded but the HTTP response was lost"
+    // case — reuses the same key and the server short-circuits to the cached
+    // result instead of posting a second Reel. djb2 hash keeps it bounded and
+    // content-specific (a genuinely different caption/source yields a new key).
+    const keyBasis = `${entryId}|${entry.url || ''}|${entry.instagramCaption || entry.caption || ''}`;
+    let keyHash = 5381;
+    for (let i = 0; i < keyBasis.length; i++) {
+      keyHash = ((keyHash << 5) + keyHash + keyBasis.charCodeAt(i)) | 0;
+    }
+    const idempotencyKey = `pub_${entryId}_${(keyHash >>> 0).toString(36)}`;
 
     // Clear any previous error when starting a new upload
     setEntries(entries => entries.map(e =>
@@ -791,6 +776,10 @@ export default function Home() {
     setUploadingEntry(entryId);
     setUploadStatus('Uploading video...');
     setUploadProgress(10);
+
+    // Tracked so we can clean up the blob if a later step (publish) fails —
+    // otherwise a failed attempt leaves an orphaned public video in blob storage.
+    let uploadedBlobUrl: string | null = null;
 
     try {
       // Upload to Vercel Blob (direct from browser, bypasses Vercel serverless limits)
@@ -805,6 +794,7 @@ export default function Home() {
         access: 'public',
         handleUploadUrl: '/api/upload',
       });
+      uploadedBlobUrl = uploadedBlob.url;
 
       setUploadProgress(70);
       setUploadStatus('Publishing to Instagram...');
@@ -817,6 +807,7 @@ export default function Home() {
           videoUrl: uploadedBlob.url,
           caption: entry.instagramCaption || entry.caption || '',
           shareToFeed: false,
+          idempotencyKey,
         }),
       });
 
@@ -912,6 +903,20 @@ export default function Home() {
           : e
       ));
 
+      // Clean up the orphaned blob if we uploaded one but failed to publish it.
+      if (uploadedBlobUrl) {
+        try {
+          await fetch('/api/storage/delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: uploadedBlobUrl }),
+          });
+          console.log('[Blob Delete] Cleaned up orphaned blob after failed publish');
+        } catch (e) {
+          console.error('[Blob Delete] Failed to clean up orphaned blob:', e);
+        }
+      }
+
       // Clear uploading state but keep the error
       setUploadingEntry(null);
       setUploadProgress(0);
@@ -930,6 +935,26 @@ export default function Home() {
   // Called when user clicks "Upload Reel" - adds to queue BEFORE rendering
   function handleUploadRequest(entryId: string) {
     console.log('[Queue] handleUploadRequest called for entry:', entryId);
+
+    // Never run the single-upload queue concurrently with a bulk upload — they
+    // drive the same canvases and would race.
+    if (bulkUploading) {
+      console.log('[Queue] Skipping — a bulk upload is in progress');
+      return;
+    }
+
+    // Dedupe: never enqueue something that's already published, already queued,
+    // or currently being processed. Read fresh state from entriesRef.
+    const entry = entriesRef.current.find(e => e.id === entryId);
+    if (entry?.instagramPermalink || entry?.data?.publishedMediaId) {
+      console.log('[Queue] Skipping — entry already published:', entryId);
+      return;
+    }
+    if (uploadQueueRef.current.includes(entryId) || processingEntryIdRef.current === entryId) {
+      console.log('[Queue] Skipping — entry already queued/processing:', entryId);
+      return;
+    }
+
     // Add to queue
     uploadQueueRef.current.push(entryId);
     console.log('[Queue] Queue now has:', uploadQueueRef.current.length, 'items');
@@ -1025,15 +1050,24 @@ export default function Home() {
       setUploadProgress(50);
       setUploadStatus('Publishing to Instagram...');
 
-      // Step 2: Publish to Instagram
-      const entry = entries.find(e => e.id === entryId);
+      // Step 2: Publish to Instagram (fresh state read + idempotency key so this
+      // path is exactly-once too, matching the Vercel-Blob upload path).
+      const entry = entriesRef.current.find(e => e.id === entryId);
+      const caption = entry?.caption || '';
+      const keyBasis = `${entryId}|${entry?.url || ''}|${caption}`;
+      let keyHash = 5381;
+      for (let i = 0; i < keyBasis.length; i++) {
+        keyHash = ((keyHash << 5) + keyHash + keyBasis.charCodeAt(i)) | 0;
+      }
+      const idempotencyKey = `pub_${entryId}_${(keyHash >>> 0).toString(36)}`;
       const publishRes = await fetch('/api/meta/reels/publish', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           videoUrl,
-          caption: entry?.caption || '',
+          caption,
           shareToFeed: true,
+          idempotencyKey,
         }),
       });
 
@@ -1414,6 +1448,7 @@ export default function Home() {
               )}
             </div>
           ) : (
+            <div className="flex items-center gap-2">
             <button
               onClick={connectMeta}
               disabled={loadingIgUser}
@@ -1424,6 +1459,12 @@ export default function Home() {
               </svg>
               {loadingIgUser ? 'Loading...' : 'Connect Instagram'}
             </button>
+            {metaError && (
+              <span className="text-xs text-red-400 max-w-[220px] truncate" title={metaError}>
+                {metaError}
+              </span>
+            )}
+            </div>
           )}
 
           <div className="w-px h-6 bg-zinc-800 mx-1"></div>
@@ -1757,7 +1798,7 @@ export default function Home() {
             {igUser && googleToken && (
               <button
                 onClick={uploadAllToInstagram}
-                disabled={bulkUploading}
+                disabled={bulkUploading || uploadingEntry !== null || entries.some(e => e.queuePosition !== undefined)}
                 className="flex items-center gap-2 rounded-lg bg-gradient-to-r from-purple-500 via-pink-500 to-orange-400 px-6 py-3 text-sm font-semibold text-white hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1798,6 +1839,15 @@ export default function Home() {
                     onUploadToInstagram={(blob, filename) => handleUploadToInstagram(entry.id, blob, filename)}
                     onUploadRequest={() => handleUploadRequest(entry.id)}
                     igConnected={!!igUser}
+                    uploadState={
+                      entry.instagramPermalink || entry.data?.publishedMediaId
+                        ? 'published'
+                        : uploadingEntry === entry.id || entry.queuePosition === 0
+                          ? 'uploading'
+                          : (entry.queuePosition !== undefined && entry.queuePosition > 0) || bulkUploading
+                            ? 'queued'
+                            : 'idle'
+                    }
                     brand={brandMode}
                     stripAudio={stripAudio}
                     lowBitrate={lowBitrate}
@@ -2204,12 +2254,3 @@ export default function Home() {
   );
 }
 
-function DownloadIcon() {
-  return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-      <polyline points="7 10 12 15 17 10"/>
-      <line x1="12" y1="15" x2="12" y2="3"/>
-    </svg>
-  );
-}

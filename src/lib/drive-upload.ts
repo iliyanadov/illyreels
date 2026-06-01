@@ -1,6 +1,8 @@
 // Upload a file directly to Google Drive from the browser
 // This bypasses Vercel's size limits by using the Google Drive API directly
 
+import { fetchWithTimeout } from '@/lib/fetch-timeout';
+
 export interface DriveUploadResult {
   fileId: string;
   downloadUrl: string;
@@ -17,7 +19,7 @@ export async function uploadToGoogleDrive(
 
   // Step 1: Initiate resumable upload session
   const initUrl = new URL('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable');
-  const initResponse = await fetch(initUrl.toString(), {
+  const initResponse = await fetchWithTimeout(initUrl.toString(), {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${accessToken}`,
@@ -42,15 +44,20 @@ export async function uploadToGoogleDrive(
     throw new Error('No upload URL received from Google Drive');
   }
 
-  // Step 2: Upload the file using the resumable upload URL
-  const uploadResponse = await fetch(uploadUrl, {
-    method: 'PUT',
-    headers: {
-      'Content-Type': file.type,
-      'Content-Length': file.size.toString(),
+  // Step 2: Upload the file using the resumable upload URL.
+  // Larger timeout (30s) since this transfers the full file payload.
+  const uploadResponse = await fetchWithTimeout(
+    uploadUrl,
+    {
+      method: 'PUT',
+      headers: {
+        'Content-Type': file.type,
+        'Content-Length': file.size.toString(),
+      },
+      body: file,
     },
-    body: file,
-  });
+    30000
+  );
 
   if (!uploadResponse.ok) {
     const error = await uploadResponse.text();
@@ -62,7 +69,7 @@ export async function uploadToGoogleDrive(
   // Step 3: Set permissions to make the file publicly accessible
   const fileId = fileData.id;
   const permissionUrl = new URL(`https://www.googleapis.com/drive/v3/files/${fileId}/permissions`);
-  await fetch(permissionUrl.toString(), {
+  await fetchWithTimeout(permissionUrl.toString(), {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${accessToken}`,
@@ -76,7 +83,7 @@ export async function uploadToGoogleDrive(
 
   // Step 4: Get the file with webViewLink
   const fileUrl = new URL(`https://www.googleapis.com/drive/v3/files/${fileId}?fields=webViewLink`);
-  const fileResponse = await fetch(fileUrl.toString(), {
+  const fileResponse = await fetchWithTimeout(fileUrl.toString(), {
     headers: {
       'Authorization': `Bearer ${accessToken}`,
     },

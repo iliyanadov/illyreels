@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getMetaToken, getIgUserId, getIgAccessToken } from '@/lib/meta-token-storage';
+import { claimIdempotencyKey, completeIdempotencyKey, releaseIdempotencyKey } from '@/lib/idempotency';
 
 export const runtime = 'nodejs';
+// The flow creates a container, polls up to ~5 minutes, then publishes — all in
+// one request. Without this it would be killed at the platform default timeout,
+// which both fails slow publishes AND drives the duplicate-Reel retries.
+export const maxDuration = 300;
 
 // Using graph.instagram.com for Instagram Login flow (not Facebook Login)
 const GRAPH_HOST = 'https://graph.instagram.com';
@@ -13,6 +18,7 @@ interface PublishRequest {
   caption?: string;
   shareToFeed?: boolean;
   videoUrl: string;
+  idempotencyKey?: string;
 }
 
 interface PublishResponse {
@@ -207,6 +213,8 @@ async function getPermalink(mediaId: string, igAccessToken: string): Promise<str
 }
 
 export async function POST(request: NextRequest) {
+  // Hoisted so the catch block can release the idempotency claim on failure.
+  let idempotencyKey: string | undefined;
   try {
     // Get the stored Instagram user access token
     const igUserId = await getIgUserId();
@@ -222,12 +230,31 @@ export async function POST(request: NextRequest) {
     const body = await request.json() as PublishRequest;
 
     const { caption = '', shareToFeed = false, videoUrl } = body;
+    idempotencyKey = body.idempotencyKey;
 
     if (!videoUrl) {
       return NextResponse.json(
         { error: 'videoUrl is required' },
         { status: 400 }
       );
+    }
+
+    // Exactly-once guard: claim the key before any work. A retry or platform
+    // replay of the same key returns the prior result (or a 409 while still
+    // publishing) instead of creating a second Reel.
+    if (idempotencyKey) {
+      const claim = await claimIdempotencyKey(idempotencyKey);
+      if (claim.state === 'done') {
+        console.log('[Reels Publish] Idempotent replay — returning cached result');
+        return NextResponse.json(claim.result);
+      }
+      if (claim.state === 'in_progress') {
+        return NextResponse.json(
+          { error: 'This video is already being published. Please wait a moment.' },
+          { status: 409 }
+        );
+      }
+      // 'claimed' or 'disabled' → proceed with the publish.
     }
 
     console.log('[Reels Publish] Starting publish workflow...');
@@ -277,9 +304,16 @@ export async function POST(request: NextRequest) {
       permalink: permalink ?? undefined,
     };
 
+    if (idempotencyKey) await completeIdempotencyKey(idempotencyKey, result);
+
     return NextResponse.json(result);
   } catch (error: any) {
     console.error('[Reels Publish] Error:', error?.message || error);
+
+    // Publishing failed before completion — release the claim so a legitimate
+    // retry isn't permanently blocked. (No code path reaches here after a
+    // successful media_publish, so this can't wipe a real success.)
+    if (idempotencyKey) await releaseIdempotencyKey(idempotencyKey);
 
     const errorMessage = error?.message || error?.toString() || '';
 

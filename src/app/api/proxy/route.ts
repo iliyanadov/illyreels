@@ -1,13 +1,31 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+export const runtime = 'nodejs';
+// Streaming a video through the function can take a while on slow CDNs; give it
+// headroom, and bound each upstream fetch with a timeout below.
+export const maxDuration = 60;
+
+const PROXY_TIMEOUT = 45000;
+
+// Hosts the proxy may fetch. These URLs only ever originate from our own
+// /api/download response (TikTok/Instagram CDNs). tikwm rotates across several
+// ByteDance/TikTok CDN families, so this list must cover them or playback and
+// download intermittently 403 with "URL not allowed".
 const ALLOWED_HOSTS = [
   'tikwm.com',
+  'tiktok.com',
   'tiktokcdn.com',
-  'tiktokv.com',
   'tiktokcdn-us.com',
+  'tiktokcdn-eu.com',
+  'tiktokv.com',
+  'tiktokv.us',
   'tokcdn.com',
+  'byteoversea.com',
+  'ibyteimg.com',
+  'ipstatp.com',
   'muscdn.app',
   'fastdl.muscdn.app',
+  'muscdn.com',
   'rapidcdn.app',
   'd.rapidcdn.app',
   'cdninstagram.com',
@@ -20,6 +38,16 @@ function isAllowedHost(url: string): boolean {
     return ALLOWED_HOSTS.some(h => hostname === h || hostname.endsWith(`.${h}`));
   } catch {
     return false;
+  }
+}
+
+async function fetchWithTimeout(url: string, init: RequestInit = {}, timeout = PROXY_TIMEOUT): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 
@@ -57,36 +85,42 @@ export async function GET(request: NextRequest) {
       upstreamHeaders['Range'] = range;
     }
 
-    // Follow redirects manually to get the final URL
-    const upstream = await fetch(url, {
+    // Resolve redirects manually so EVERY hop is re-validated against the
+    // allowlist — otherwise an allowed CDN could 3xx-pivot the proxy to an
+    // arbitrary/internal host. Bounded to a few hops.
+    let current = url;
+    let response = await fetchWithTimeout(current, {
       headers: upstreamHeaders,
       redirect: 'manual',
     });
-
-    // Handle redirects
-    if (upstream.status === 301 || upstream.status === 302 || upstream.status === 307 || upstream.status === 308) {
-      const location = upstream.headers.get('location');
-      if (location) {
-        // Follow the redirect
-        const finalResponse = await fetch(location, {
-          headers: upstreamHeaders,
-        });
-        if (!finalResponse.ok) {
-          return NextResponse.json({ error: 'Failed to fetch file after redirect' }, { status: 502 });
-        }
-
-        return buildProxyResponse(finalResponse, filename, stream);
+    for (let hop = 0; hop < 5; hop++) {
+      const s = response.status;
+      if (s !== 301 && s !== 302 && s !== 307 && s !== 308) break;
+      const location = response.headers.get('location');
+      if (!location) break;
+      const target = new URL(location, current).toString();
+      if (!isAllowedHost(target)) {
+        return NextResponse.json({ error: 'Redirect to disallowed host' }, { status: 403 });
       }
+      current = target;
+      response = await fetchWithTimeout(current, {
+        headers: upstreamHeaders,
+        redirect: 'manual',
+      });
     }
 
-    if (!upstream.ok) {
+    if (!response.ok) {
       return NextResponse.json({ error: 'Failed to fetch file' }, { status: 502 });
     }
 
-    return buildProxyResponse(upstream, filename, stream);
-  } catch (error) {
+    return buildProxyResponse(response, filename, stream);
+  } catch (error: any) {
+    const timedOut = error?.name === 'AbortError';
     console.error('Proxy error:', error);
-    return NextResponse.json({ error: 'Proxy error' }, { status: 502 });
+    return NextResponse.json(
+      { error: timedOut ? 'Upstream timed out' : 'Proxy error' },
+      { status: timedOut ? 504 : 502 }
+    );
   }
 }
 

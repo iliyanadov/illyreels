@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { setMetaToken } from '@/lib/meta-token-storage';
+import { fetchWithTimeout, isAbortError } from '@/lib/fetch-timeout';
 
 export const runtime = 'nodejs';
 
@@ -29,11 +30,16 @@ async function exchangeCodeForToken(code: string): Promise<{ access_token: strin
     code: code,
   });
 
-  const response = await fetch(url.toString(), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body,
-  });
+  // 12s upstream timeout on the OAuth token exchange.
+  const response = await fetchWithTimeout(
+    url.toString(),
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body,
+    },
+    12000
+  );
 
   if (!response.ok) {
     const error = await response.text();
@@ -65,7 +71,8 @@ async function getLongLivedToken(shortLivedToken: string): Promise<{ access_toke
 
   console.log('[Instagram Callback] Calling:', 'https://graph.instagram.com/access_token');
 
-  const response = await fetch(url.toString(), { method: 'GET' });
+  // 12s upstream timeout on the long-lived token exchange.
+  const response = await fetchWithTimeout(url.toString(), { method: 'GET' }, 12000);
 
   if (!response.ok) {
     const error = await response.text();
@@ -123,6 +130,14 @@ export async function GET(request: NextRequest) {
 
   } catch (error: any) {
     console.error('[Instagram Callback] Error:', error);
+
+    if (isAbortError(error)) {
+      return NextResponse.json(
+        { error: 'Upstream timed out. Please try again.' },
+        { status: 504 }
+      );
+    }
+
     return errorPage(error?.message || 'Unknown error');
   }
 }

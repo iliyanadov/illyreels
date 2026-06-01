@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getGoogleToken, googleFetch } from '@/lib/google-token-storage';
+import { getGoogleToken, googleFetch, GoogleAuthError } from '@/lib/google-token-storage';
+import { isAbortError } from '@/lib/fetch-timeout';
 
 export const runtime = 'nodejs';
 
@@ -94,6 +95,21 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ rows });
   } catch (error: any) {
     console.error('[Google Sheets] Fetch error:', error?.message || error);
+
+    // Refresh failed definitively — tell the client to reconnect Google.
+    if (error instanceof GoogleAuthError) {
+      return NextResponse.json(
+        { error: 'Please reconnect your Google account.' },
+        { status: 401 }
+      );
+    }
+    // Upstream timed out — surface as a gateway timeout.
+    if (isAbortError(error)) {
+      return NextResponse.json(
+        { error: 'Google request timed out. Please try again.' },
+        { status: 504 }
+      );
+    }
 
     return NextResponse.json(
       { error: error.message || 'Failed to fetch spreadsheet data' },

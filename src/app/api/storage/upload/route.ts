@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { uploadVideo as uploadToDrive } from '@/lib/drive-storage';
 import { getGoogleToken } from '@/lib/google-token-storage';
+import { isAbortError } from '@/lib/fetch-timeout';
 
 export const runtime = 'nodejs';
+// Large Drive uploads can take a while; allow up to 5 minutes.
+export const maxDuration = 300;
 
 // Maximum file size: 1GB (Instagram's limit)
 const MAX_FILE_SIZE = 1024 * 1024 * 1024;
@@ -66,6 +69,14 @@ export async function POST(request: NextRequest) {
     });
   } catch (error: any) {
     console.error('[Storage Upload] Error:', error?.message || error);
+
+    // A hung Drive upload surfaces as an AbortError from fetchWithTimeout.
+    if (isAbortError(error)) {
+      return NextResponse.json(
+        { error: 'Upload to Google Drive timed out. Please try again.' },
+        { status: 504 }
+      );
+    }
 
     // Check for Google auth errors
     if (error?.message?.includes('invalid') || error?.message?.includes('authentication')) {

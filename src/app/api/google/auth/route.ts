@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { google } from 'googleapis';
+import { GoogleAuthError } from '@/lib/google-token-storage';
+import { isAbortError } from '@/lib/fetch-timeout';
 
 export const runtime = 'nodejs';
 
@@ -25,6 +27,22 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ authUrl });
   } catch (error) {
     console.error('OAuth error:', error);
+
+    // Refresh failed definitively — tell the client to reconnect Google.
+    if (error instanceof GoogleAuthError) {
+      return NextResponse.json(
+        { error: 'Please reconnect your Google account.' },
+        { status: 401 }
+      );
+    }
+    // Upstream timed out — surface as a gateway timeout.
+    if (isAbortError(error)) {
+      return NextResponse.json(
+        { error: 'Google request timed out. Please try again.' },
+        { status: 504 }
+      );
+    }
+
     return NextResponse.json(
       { error: 'Failed to generate OAuth URL' },
       { status: 500 }

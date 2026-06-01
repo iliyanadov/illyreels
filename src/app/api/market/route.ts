@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { fetchWithTimeout, isAbortError } from '@/lib/fetch-timeout';
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
@@ -27,7 +28,8 @@ export async function GET(request: NextRequest) {
   console.log('API key present:', !!apiKey);
 
   try {
-    const response = await fetch(
+    // Wrap the DFlow market API call so a hung upstream surfaces as a clean 504.
+    const response = await fetchWithTimeout(
       `${apiUrl}/api/v1/event/${eventId}?withNestedMarkets=${withNestedMarkets}`,
       {
         headers: {
@@ -52,6 +54,12 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(data);
   } catch (error) {
     console.error('Market API error:', error);
+    if (isAbortError(error)) {
+      return NextResponse.json(
+        { error: 'Market data request timed out. Please try again.' },
+        { status: 504 }
+      );
+    }
     return NextResponse.json(
       { error: 'Failed to fetch market data' },
       { status: 500 }
