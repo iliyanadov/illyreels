@@ -12,7 +12,7 @@ describe('GET /api/proxy', () => {
         req.headers.set('x-test-url', 'https://evil.com/video.mp4');
       },
       test: async ({ fetch }) => {
-        const res = await fetch('/');
+        const res = await fetch();
         expect(res.status).toBe(403);
 
         const data = await res.json();
@@ -25,7 +25,7 @@ describe('GET /api/proxy', () => {
     await testApiHandler({
       appHandler,
       test: async ({ fetch }) => {
-        const res = await fetch('/');
+        const res = await fetch();
         expect(res.status).toBe(400);
 
         const data = await res.json();
@@ -41,7 +41,7 @@ describe('GET /api/proxy', () => {
         req.headers.set('x-test-url', 'https://tikwm.com/video.mp4');
       },
       test: async ({ fetch }) => {
-        const res = await fetch('/');
+        const res = await fetch();
         // Should not be 403 (forbidden), may be 502 if upstream fails but that's OK
         expect(res.status).not.toBe(403);
       },
@@ -55,7 +55,7 @@ describe('GET /api/proxy', () => {
         req.headers.set('x-test-url', 'https://cdninstagram.com/video.mp4');
       },
       test: async ({ fetch }) => {
-        const res = await fetch('/');
+        const res = await fetch();
         // Should not be 403 (forbidden)
         expect(res.status).not.toBe(403);
       },
@@ -69,7 +69,7 @@ describe('GET /api/proxy', () => {
         req.headers.set('x-test-url', 'https://tiktok.com.evil.com/video.mp4');
       },
       test: async ({ fetch }) => {
-        const res = await fetch('/');
+        const res = await fetch();
         expect(res.status).toBe(403);
 
         const data = await res.json();
@@ -85,7 +85,7 @@ describe('GET /api/proxy', () => {
         req.headers.set('x-test-url', 'https://sub.tiktokcdn.com/video.mp4');
       },
       test: async ({ fetch }) => {
-        const res = await fetch('/');
+        const res = await fetch();
         // Should not be 403 (forbidden)
         expect(res.status).not.toBe(403);
       },
@@ -99,7 +99,7 @@ describe('GET /api/proxy', () => {
         req.headers.set('x-test-url', 'https://com.tiktokcdn.evil.com/video.mp4');
       },
       test: async ({ fetch }) => {
-        const res = await fetch('/');
+        const res = await fetch();
         expect(res.status).toBe(403);
       },
     });

@@ -34,7 +34,7 @@ describe('GET /api/market', () => {
         });
       },
       test: async ({ fetch }) => {
-        const res = await fetch('/');
+        const res = await fetch();
         expect(res.status).toBe(200);
 
         const data = await res.json();
@@ -51,7 +51,7 @@ describe('GET /api/market', () => {
     await testApiHandler({
       appHandler,
       test: async ({ fetch }) => {
-        const res = await fetch('/');
+        const res = await fetch();
         expect(res.status).toBe(400);
 
         const data = await res.json();
@@ -69,8 +69,17 @@ describe('GET /api/market', () => {
 
     await testApiHandler({
       appHandler,
+      requestPatcher(req) {
+        // Supply the eventId the route reads from searchParams so this test
+        // exercises the DFlow API (503) path rather than the missing-id (400) path.
+        const originalGet = req.nextUrl.searchParams.get.bind(req.nextUrl.searchParams);
+        req.nextUrl.searchParams.get = vi.fn((name: string) => {
+          if (name === 'eventId') return 'KXENGAGEMENTTIMOTHEEKYLIE-26';
+          return originalGet(name);
+        });
+      },
       test: async ({ fetch }) => {
-        const res = await fetch('/?eventId=KXENGAGEMENTTIMOTHEEKYLIE-26');
+        const res = await fetch();
         expect(res.status).toBeGreaterThanOrEqual(400);
 
         const data = await res.json();

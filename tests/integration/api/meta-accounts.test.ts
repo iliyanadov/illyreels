@@ -24,7 +24,7 @@ describe('GET /api/meta/accounts', () => {
     await testApiHandler({
       appHandler,
       test: async ({ fetch }) => {
-        const res = await fetch('/');
+        const res = await fetch();
         expect(res.status).toBe(200);
 
         const data = await res.json();
@@ -50,7 +50,7 @@ describe('GET /api/meta/accounts', () => {
     await testApiHandler({
       appHandler,
       test: async ({ fetch }) => {
-        const res = await fetch('/');
+        const res = await fetch();
         expect(res.status).toBe(200);
 
         const data = await res.json();
@@ -67,7 +67,7 @@ describe('GET /api/meta/accounts', () => {
     await testApiHandler({
       appHandler,
       test: async ({ fetch }) => {
-        const res = await fetch('/');
+        const res = await fetch();
         const data = await res.json();
 
         expect(JSON.stringify(data)).not.toContain('userAccessToken');

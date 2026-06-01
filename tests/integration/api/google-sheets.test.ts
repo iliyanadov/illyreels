@@ -10,6 +10,9 @@ vi.mock('@/lib/google-token-storage', () => ({
   setGoogleToken: vi.fn(),
   clearGoogleToken: vi.fn(),
   hasGoogleToken: vi.fn(),
+  // The route calls googleFetch(); pass through to global fetch so MSW can
+  // intercept the Google Sheets request in the success-path tests.
+  googleFetch: vi.fn(async (url: string) => fetch(url)),
 }));
 
 import * as appHandler from '@/app/api/google/sheets/route';
@@ -55,17 +58,21 @@ describe('GET /api/google/sheets', () => {
         });
       },
       test: async ({ fetch }) => {
-        const res = await fetch('/');
+        const res = await fetch();
         expect(res.status).toBe(200);
 
         const data = await res.json();
         expect(data).toHaveProperty('rows');
         expect(data.rows).toHaveLength(2);
+        // The route returns columns A-E plus the spreadsheet row number; rows
+        // start at the default start_row (4).
         expect(data.rows[0]).toEqual({
           url: 'https://tiktok.com/v1',
           caption: 'Caption 1',
           tag: 'tag1',
           instagramCaption: 'IG Caption 1',
+          status: '',
+          sheetRow: 4,
         });
       },
     });
@@ -97,7 +104,7 @@ describe('GET /api/google/sheets', () => {
         });
       },
       test: async ({ fetch }) => {
-        const res = await fetch('/');
+        const res = await fetch();
         expect(res.status).toBe(200);
 
         const data = await res.json();
@@ -133,7 +140,7 @@ describe('GET /api/google/sheets', () => {
         });
       },
       test: async ({ fetch }) => {
-        const res = await fetch('/');
+        const res = await fetch();
         expect(res.status).toBe(200);
 
         const data = await res.json();
@@ -143,6 +150,8 @@ describe('GET /api/google/sheets', () => {
           caption: '',
           tag: 'tag1',
           instagramCaption: '',
+          status: '',
+          sheetRow: 4,
         });
       },
     });

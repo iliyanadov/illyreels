@@ -149,7 +149,7 @@ test.describe('Full User Workflow', () => {
 
     // Get URL inputs
     const urlInputs = page.getByPlaceholder('Paste TikTok URL...');
-    await expect(urlInputs).toHaveCount(expect.any(Number));
+    expect(await urlInputs.count()).toBeGreaterThan(0);
 
     // Step 5: Fetch all videos
     await page.getByRole('button', { name: 'Fetch All Videos' }).click();

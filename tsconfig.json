@@ -13,6 +13,9 @@
     "isolatedModules": true,
     "jsx": "react-jsx",
     "incremental": true,
+    // Make vitest globals (vi/describe/expect) and Node globals resolve in tests
+    // without per-file imports. vitest config uses globals:true.
+    "types": ["vitest/globals", "node"],
     "plugins": [
       {
         "name": "next"

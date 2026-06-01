@@ -127,7 +127,10 @@ describe('POST /api/download', () => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ url: 'https://www.tiktok.com/@user/video/123' }),
         });
-        expect(res.status).toBe(400);
+        // The download route now treats upstream rate-limiting as a retryable
+        // condition and surfaces it as 429 (after exhausting retries) rather
+        // than 400. The key assertion is the user-friendly message below.
+        expect(res.status).toBe(429);
 
         const data = await res.json();
         expect(data).toHaveProperty('error');
