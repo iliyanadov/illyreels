@@ -37,7 +37,7 @@ function calcVideoBox(vw: number, vh: number, currentBrand: string, reserveIndex
 }
 
 // ── `index` CTA carousel (ported from the landing "CTA animation 2") ─────────
-const INDEX_BAND_RESERVE = 360; // vertical space reserved below the video
+const INDEX_BAND_RESERVE = 240; // vertical space reserved below the video
 const INDEX_HERO_IDS = [
   '3TVXtAsR1Inumwj472S9r4', // Drake
   '53XhwfbYqKCa1cC15pYq2q', // Imagine Dragons
@@ -1271,22 +1271,22 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     // ── Card shell ──
     const cardX = 60;
     const cardW = CANVAS_W - 120; // 960
-    const cardH = 176;
+    const cardH = 112;
     const cardY = boxY;
-    const pad = 32;
+    const pad = 22;
     ctx.save();
-    idxRoundRectPath(ctx, cardX, cardY, cardW, cardH, 24);
+    idxRoundRectPath(ctx, cardX, cardY, cardW, cardH, 18);
     ctx.fillStyle = 'rgba(255,255,255,0.02)';
     ctx.fill();
-    ctx.lineWidth = 4;
+    ctx.lineWidth = 3;
     ctx.strokeStyle = '#27272a';
     ctx.stroke();
     ctx.restore();
 
     const rowCY = cardY + cardH / 2;
 
-    // Avatar (80px circle, grey placeholder until cleanly loaded)
-    const avSize = 80;
+    // Avatar (circle, grey placeholder until cleanly loaded)
+    const avSize = 52;
     const avX = cardX + pad;
     const avY = rowCY - avSize / 2;
     ctx.save();
@@ -1304,25 +1304,25 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     ctx.restore();
 
     // Name + "Index" label (column sizes to the name, capped)
-    const nameColX = avX + avSize + 24;
-    const nameMaxW = 300;
+    const nameColX = avX + avSize + 20;
+    const nameMaxW = 240;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'alphabetic';
-    ctx.font = '500 28px system-ui, sans-serif';
+    ctx.font = '500 22px system-ui, sans-serif';
     const fullNameW = ctx.measureText(a.name || '').width;
     ctx.fillStyle = '#ffffff';
-    ctx.fillText(idxEllipsize(ctx, a.name || '', nameMaxW), nameColX, rowCY - 6);
-    ctx.font = '400 24px system-ui, sans-serif';
+    ctx.fillText(idxEllipsize(ctx, a.name || '', nameMaxW), nameColX, rowCY - 4);
+    ctx.font = '400 16px system-ui, sans-serif';
     ctx.fillStyle = '#a1a1aa';
-    ctx.fillText('Index', nameColX, rowCY + 28);
+    ctx.fillText('Index', nameColX, rowCY + 22);
     const nameColW = Math.min(fullNameW, nameMaxW);
 
     // Right column reserved for the numbers; chart flexes into the middle
     const rightEdge = cardX + cardW - pad;
-    const rightColW = 200;
-    const chartX = nameColX + nameColW + 28;
-    const chartW = rightEdge - rightColW - 24 - chartX;
-    const chartH = 112;
+    const rightColW = 170;
+    const chartX = nameColX + nameColW + 24;
+    const chartW = rightEdge - rightColW - 20 - chartX;
+    const chartH = 68;
     const chartY = rowCY - chartH / 2;
 
     let dotPrice = a.index_price ?? 0;
@@ -1357,12 +1357,12 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
         acc += seg;
       }
       ctx.strokeStyle = color;
-      ctx.lineWidth = 3;
+      ctx.lineWidth = 2.5;
       ctx.lineJoin = 'round';
       ctx.lineCap = 'round';
       ctx.stroke();
       ctx.beginPath();
-      ctx.arc(dot.x, dot.y, 7, 0, Math.PI * 2);
+      ctx.arc(dot.x, dot.y, 5, 0, Math.PI * 2);
       ctx.fillStyle = color;
       ctx.fill();
       ctx.restore();
@@ -1373,28 +1373,28 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     // Points value + "points" suffix (right-aligned)
     ctx.textAlign = 'right';
     ctx.textBaseline = 'alphabetic';
-    ctx.font = '400 18px system-ui, sans-serif';
+    ctx.font = '400 14px system-ui, sans-serif';
     ctx.fillStyle = '#a1a1aa';
-    ctx.fillText('points', rightEdge, rowCY - 14);
+    ctx.fillText('points', rightEdge, rowCY - 10);
     const ptsLabelW = ctx.measureText('points').width;
-    ctx.font = '400 26px system-ui, sans-serif';
+    ctx.font = '400 20px system-ui, sans-serif';
     ctx.fillText(
       dotPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
-      rightEdge - ptsLabelW - 8,
-      rowCY - 14,
+      rightEdge - ptsLabelW - 6,
+      rowCY - 10,
     );
 
     // Percent + triangle (green up / red down)
     const isUp = pct >= 0;
     const pctColor = isUp ? '#04df9d' : '#FF4B4B';
     const pctStr = Math.abs(pct).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '%';
-    ctx.font = '500 26px system-ui, sans-serif';
+    ctx.font = '500 20px system-ui, sans-serif';
     ctx.fillStyle = pctColor;
-    ctx.fillText(pctStr, rightEdge, rowCY + 30);
+    ctx.fillText(pctStr, rightEdge, rowCY + 24);
     const pctW = ctx.measureText(pctStr).width;
-    const triS = 16;
-    const triX = rightEdge - pctW - 10 - triS;
-    const triTop = rowCY + 30 - 20;
+    const triS = 13;
+    const triX = rightEdge - pctW - 8 - triS;
+    const triTop = rowCY + 24 - 15;
     ctx.beginPath();
     if (isUp) {
       ctx.moveTo(triX + triS / 2, triTop);
@@ -1415,14 +1415,14 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
       logo.src = '/sonotradelogoname.png';
       sonotradeLogoRef.current = logo;
     }
-    const winW = 312;
-    const winH = 96;
-    const gap = 20;
-    ctx.font = '500 28px system-ui, sans-serif';
+    const winW = 200;
+    const winH = 62;
+    const gap = 16;
+    ctx.font = '500 22px system-ui, sans-serif';
     const linkText = 'Link in bio';
     const linkW = ctx.measureText(linkText).width;
     const groupX = (CANVAS_W - (winW + gap + linkW)) / 2;
-    const lockupY = cardY + cardH + 48;
+    const lockupY = cardY + cardH + 24;
     if (logo.complete && logo.naturalWidth > 0) {
       // The asset is a 1080×1350 poster with the wordmark centered in empty
       // space; crop to that band (source y 509, height 332) so it shows large.
