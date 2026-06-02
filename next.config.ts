@@ -10,6 +10,9 @@ const nextConfig: NextConfig = {
   // follow, so force-include their dependency trees into the download function.
   outputFileTracingIncludes: {
     '/api/download': [
+      // ruhend nests some deps under its own node_modules — grab the whole tree.
+      './node_modules/ruhend-scraper/**',
+      './node_modules/tslib/**',
       './node_modules/cheerio/**',
       './node_modules/cheerio-select/**',
       './node_modules/css-select/**',
