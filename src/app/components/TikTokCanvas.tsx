@@ -1271,14 +1271,14 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     // ── Card shell ──
     const cardX = 60;
     const cardW = CANVAS_W - 120; // 960
-    const cardH = 112;
+    const cardH = 156;
     const cardY = boxY;
-    const pad = 22;
+    const pad = 26;
     ctx.save();
-    idxRoundRectPath(ctx, cardX, cardY, cardW, cardH, 18);
+    idxRoundRectPath(ctx, cardX, cardY, cardW, cardH, 22);
     ctx.fillStyle = 'rgba(255,255,255,0.02)';
     ctx.fill();
-    ctx.lineWidth = 3;
+    ctx.lineWidth = 4;
     ctx.strokeStyle = '#27272a';
     ctx.stroke();
     ctx.restore();
@@ -1286,7 +1286,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     const rowCY = cardY + cardH / 2;
 
     // Avatar (circle, grey placeholder until cleanly loaded)
-    const avSize = 52;
+    const avSize = 70;
     const avX = cardX + pad;
     const avY = rowCY - avSize / 2;
     ctx.save();
@@ -1304,25 +1304,25 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     ctx.restore();
 
     // Name + "Index" label (column sizes to the name, capped)
-    const nameColX = avX + avSize + 20;
-    const nameMaxW = 240;
+    const nameColX = avX + avSize + 22;
+    const nameMaxW = 270;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'alphabetic';
-    ctx.font = '500 22px system-ui, sans-serif';
+    ctx.font = '500 26px system-ui, sans-serif';
     const fullNameW = ctx.measureText(a.name || '').width;
     ctx.fillStyle = '#ffffff';
-    ctx.fillText(idxEllipsize(ctx, a.name || '', nameMaxW), nameColX, rowCY - 4);
-    ctx.font = '400 16px system-ui, sans-serif';
+    ctx.fillText(idxEllipsize(ctx, a.name || '', nameMaxW), nameColX, rowCY - 6);
+    ctx.font = '400 20px system-ui, sans-serif';
     ctx.fillStyle = '#a1a1aa';
-    ctx.fillText('Index', nameColX, rowCY + 22);
+    ctx.fillText('Index', nameColX, rowCY + 24);
     const nameColW = Math.min(fullNameW, nameMaxW);
 
     // Right column reserved for the numbers; chart flexes into the middle
     const rightEdge = cardX + cardW - pad;
-    const rightColW = 170;
-    const chartX = nameColX + nameColW + 24;
-    const chartW = rightEdge - rightColW - 20 - chartX;
-    const chartH = 68;
+    const rightColW = 190;
+    const chartX = nameColX + nameColW + 26;
+    const chartW = rightEdge - rightColW - 22 - chartX;
+    const chartH = 96;
     const chartY = rowCY - chartH / 2;
 
     let dotPrice = a.index_price ?? 0;
@@ -1357,12 +1357,12 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
         acc += seg;
       }
       ctx.strokeStyle = color;
-      ctx.lineWidth = 2.5;
+      ctx.lineWidth = 3;
       ctx.lineJoin = 'round';
       ctx.lineCap = 'round';
       ctx.stroke();
       ctx.beginPath();
-      ctx.arc(dot.x, dot.y, 5, 0, Math.PI * 2);
+      ctx.arc(dot.x, dot.y, 7, 0, Math.PI * 2);
       ctx.fillStyle = color;
       ctx.fill();
       ctx.restore();
@@ -1373,28 +1373,28 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     // Points value + "points" suffix (right-aligned)
     ctx.textAlign = 'right';
     ctx.textBaseline = 'alphabetic';
-    ctx.font = '400 14px system-ui, sans-serif';
+    ctx.font = '400 16px system-ui, sans-serif';
     ctx.fillStyle = '#a1a1aa';
-    ctx.fillText('points', rightEdge, rowCY - 10);
+    ctx.fillText('points', rightEdge, rowCY - 11);
     const ptsLabelW = ctx.measureText('points').width;
-    ctx.font = '400 20px system-ui, sans-serif';
+    ctx.font = '400 24px system-ui, sans-serif';
     ctx.fillText(
       dotPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
-      rightEdge - ptsLabelW - 6,
-      rowCY - 10,
+      rightEdge - ptsLabelW - 8,
+      rowCY - 11,
     );
 
     // Percent + triangle (green up / red down)
     const isUp = pct >= 0;
     const pctColor = isUp ? '#04df9d' : '#FF4B4B';
     const pctStr = Math.abs(pct).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '%';
-    ctx.font = '500 20px system-ui, sans-serif';
+    ctx.font = '500 24px system-ui, sans-serif';
     ctx.fillStyle = pctColor;
     ctx.fillText(pctStr, rightEdge, rowCY + 24);
     const pctW = ctx.measureText(pctStr).width;
-    const triS = 13;
-    const triX = rightEdge - pctW - 8 - triS;
-    const triTop = rowCY + 24 - 15;
+    const triS = 15;
+    const triX = rightEdge - pctW - 9 - triS;
+    const triTop = rowCY + 24 - 18;
     ctx.beginPath();
     if (isUp) {
       ctx.moveTo(triX + triS / 2, triTop);
@@ -1415,14 +1415,14 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
       logo.src = '/sonotradelogoname.png';
       sonotradeLogoRef.current = logo;
     }
-    const winW = 200;
-    const winH = 62;
+    const winW = 176;
+    const winH = 54;
     const gap = 16;
-    ctx.font = '500 22px system-ui, sans-serif';
+    ctx.font = '500 26px system-ui, sans-serif';
     const linkText = 'Link in bio';
     const linkW = ctx.measureText(linkText).width;
     const groupX = (CANVAS_W - (winW + gap + linkW)) / 2;
-    const lockupY = cardY + cardH + 24;
+    const lockupY = cardY + cardH + 14;
     if (logo.complete && logo.naturalWidth > 0) {
       // The asset is a 1080×1350 poster with the wordmark centered in empty
       // space; crop to that band (source y 509, height 332) so it shows large.
@@ -1512,7 +1512,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
             const idxTime = !video.paused && isFinite(video.currentTime)
               ? video.currentTime
               : performance.now() / 1000;
-            drawIndexCarouselOnContext({ ctx, boxY: y + h + 30, timeSeconds: idxTime });
+            drawIndexCarouselOnContext({ ctx, boxY: y + h + 12, timeSeconds: idxTime });
           } else if (brand !== 'empty') {
             drawMarketCardOnContext({ ctx, boxY: y + h + 30 });
           }
@@ -2596,7 +2596,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
           } else if (tag?.toLowerCase() === 'index') {
             // Deterministic clock: targetTimestamp is this frame's time in seconds
             // @ts-ignore - OffscreenCanvasRenderingContext2D is compatible for our use
-            drawIndexCarouselOnContext({ ctx: offscreenCtx, boxY: box.y + box.h + 30, timeSeconds: targetTimestamp });
+            drawIndexCarouselOnContext({ ctx: offscreenCtx, boxY: box.y + box.h + 12, timeSeconds: targetTimestamp });
           } else if (brand !== 'empty') {
             // @ts-ignore - OffscreenCanvasRenderingContext2D is compatible for our use
             drawMarketCardOnContext({ ctx: offscreenCtx, boxY: box.y + box.h + 30 });
