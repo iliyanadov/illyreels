@@ -2,6 +2,10 @@ import type { NextConfig } from "next";
 import { withSentryConfig } from "@sentry/nextjs";
 
 const nextConfig: NextConfig = {
+  // These downloader libs use dynamic require() internally, which the bundler
+  // can't trace ("Cannot find module as expression is too dynamic"). Keep them
+  // external so they're loaded from node_modules at runtime in the function.
+  serverExternalPackages: ['ruhend-scraper', 'btch-downloader', 'instagram-url-direct'],
   images: {
     remotePatterns: [
       { protocol: 'https', hostname: '**.tikwm.com' },
