@@ -194,19 +194,26 @@ export async function POST(request: NextRequest) {
       let igUrl = '';
       let igCover = '';
 
-      // --- Attempt 1: ruhend-scraper igdl (returns an array of direct mp4 URLs) ---
+      // --- Attempt 1: ruhend-scraper igdl (most capable; returns an array of
+      // direct mp4 URLs). Its backend is occasionally flaky, so retry a couple
+      // times with backoff before falling through to the others. ---
       try {
         const { igdl } = await import('ruhend-scraper');
-        const r: unknown = await igdl(trimmedUrl);
-        const candidate = Array.isArray(r) ? r[0] : undefined;
-        if (typeof candidate === 'string' && /^https?:\/\//i.test(candidate)) {
-          igUrl = candidate;
-          console.log('[download] Instagram fetched via ruhend-scraper');
-        } else {
-          console.warn('[download] ruhend-scraper returned no usable URL, trying next');
+        for (let attempt = 0; attempt < 3 && !igUrl; attempt++) {
+          if (attempt > 0) await sleep(600 * attempt);
+          try {
+            const r: unknown = await igdl(trimmedUrl);
+            const candidate = Array.isArray(r) ? r[0] : undefined;
+            if (typeof candidate === 'string' && /^https?:\/\//i.test(candidate)) {
+              igUrl = candidate;
+              console.log(`[download] Instagram fetched via ruhend-scraper${attempt ? ` (attempt ${attempt + 1})` : ''}`);
+            }
+          } catch (e: any) {
+            console.warn(`[download] ruhend-scraper attempt ${attempt + 1} failed:`, e?.message || e);
+          }
         }
       } catch (e: any) {
-        console.warn('[download] ruhend-scraper threw, trying next:', e?.message || e);
+        console.warn('[download] ruhend-scraper import failed, trying next:', e?.message || e);
       }
 
       // --- Attempt 2: btch-downloader igdl ---
