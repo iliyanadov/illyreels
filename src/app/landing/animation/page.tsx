@@ -582,22 +582,32 @@ function FoundationsGraphic({ artists }: { artists: ArtistData[] }) {
 //   TopArtistsList — cycles through the hero artists every 3s
 // ───────────────────────────────────────────────────────────────────────────
 
-function TopArtistsList({ artists, showChartGrid = true }: { artists: ArtistData[]; showChartGrid?: boolean }) {
+function TopArtistsList({
+  artists,
+  showChartGrid = true,
+  logoBelow = false,
+}: {
+  artists: ArtistData[]
+  showChartGrid?: boolean
+  logoBelow?: boolean
+}) {
   const [idx, setIdx] = useState(0)
 
   useEffect(() => {
     if (!artists.length) return
-    const total = artists.length + 1
+    // With the logo pinned below the cards there is no finale slide, so the
+    // carousel only cycles through the artists themselves.
+    const total = logoBelow ? artists.length : artists.length + 1
     const t = setInterval(() => {
       setIdx((i) => (i + 1) % total)
     }, 6750)
     return () => clearInterval(t)
-  }, [artists.length])
+  }, [artists.length, logoBelow])
 
   if (!artists.length) return null
 
-  // Final slide: Sonotrade logo
-  if (idx === artists.length) {
+  // Final slide: Sonotrade logo (skipped when the logo is shown below instead)
+  if (!logoBelow && idx === artists.length) {
     return (
       <div style={{ width: '100%', padding: '0 56px', marginTop: 0 }}>
         <LogoSlide key={`logo-${idx}`} />
@@ -618,6 +628,60 @@ function TopArtistsList({ artists, showChartGrid = true }: { artists: ArtistData
   return (
     <div style={{ width: '100%', padding: '0 56px', marginTop: 0 }}>
       <CardContent key={`${a.name}-${safeIdx}`} artist={a} change={change} showChartGrid={showChartGrid} />
+      {logoBelow && <LogoBelow />}
+    </div>
+  )
+}
+
+// Persistent Sonotrade lockup shown beneath the cycling cards (used in place of
+// the finale slide). Mounts once and stays put while the cards cycle above it.
+function LogoBelow() {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 10,
+        marginTop: 24,
+        animation:
+          'sxArtistFadeIn 0.6s cubic-bezier(0.25,0.46,0.45,0.94) both',
+      }}
+    >
+      {/* The asset is a 1080×1350 poster with the wordmark in a band of empty
+          space, so we crop to that band (overflow:hidden window) and size the
+          image up — scaling the whole canvas would render the mark tiny. */}
+      <div
+        style={{
+          width: 156,
+          height: 48,
+          overflow: 'hidden',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/sonotradelogoname.png"
+          alt="Sonotrade"
+          style={{ width: 156, flexShrink: 0, display: 'block' }}
+          draggable={false}
+        />
+      </div>
+      <span
+        style={{
+          fontFamily: 'var(--font-geist-sans), sans-serif',
+          fontSize: 14,
+          fontWeight: 500,
+          letterSpacing: '-0.01em',
+          color: WHITE,
+          textAlign: 'center',
+        }}
+      >
+        Link in bio
+      </span>
     </div>
   )
 }
@@ -1450,7 +1514,7 @@ export default function LandingAnimations() {
 
           <Tile title="CTA animation 2">
             <div style={{ width: 560 }}>
-              <TopArtistsList artists={heroArtists} showChartGrid={false} />
+              <TopArtistsList artists={heroArtists} showChartGrid={false} logoBelow />
             </div>
           </Tile>
 
