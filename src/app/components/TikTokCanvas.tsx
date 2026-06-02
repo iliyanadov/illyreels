@@ -312,13 +312,22 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
         setVideoError(null);
         setIsVideoLoading(true);
         console.warn('[Row ' + (rowNumber + 1) + '] Empty video URL — re-minting a fresh one');
-        // On success the parent updates entry.data → videoSrc changes → this
-        // effect re-runs with the fresh URL. On failure, show an error.
-        refetch().catch((e) => {
-          console.error('[Row ' + (rowNumber + 1) + '] Empty-URL refetch failed:', e);
-          setIsVideoLoading(false);
-          setVideoError('Could not load this video. Try fetching it again.');
-        });
+        refetch()
+          .then((fresh) => {
+            // If the re-mint STILL yields no playable URL, videoSrc won't change
+            // and this effect won't re-run — so surface the error here instead of
+            // spinning forever (the bug that made select rows hang on "Loading…").
+            if (typeof fresh !== 'string' || !fresh) {
+              setIsVideoLoading(false);
+              setVideoError('No downloadable video for this row — it may be private, restricted, or use licensed audio.');
+            }
+            // else: parent updated entry.data → videoSrc changes → effect re-runs and loads it.
+          })
+          .catch((e) => {
+            console.error('[Row ' + (rowNumber + 1) + '] Empty-URL refetch failed:', e);
+            setIsVideoLoading(false);
+            setVideoError('Could not load this video. Try fetching it again.');
+          });
       } else {
         setIsVideoLoading(false);
         setVideoError('No playable video for this row — the source may be a photo post or unavailable.');

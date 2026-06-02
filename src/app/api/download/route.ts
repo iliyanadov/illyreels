@@ -198,6 +198,21 @@ export async function POST(request: NextRequest) {
       }
 
       const firstResult = data.result[0];
+      const igUrl = firstResult.url || '';
+
+      // The downloader sometimes returns a result entry with NO usable URL
+      // (private/restricted/trial reel, licensed audio, or the scraper is
+      // degraded). Don't hand back a 200 with empty play fields — that becomes a
+      // video element with no source and an infinite "Loading…" spinner. Fail
+      // explicitly so the UI shows a real error.
+      if (!/^https?:\/\//i.test(igUrl)) {
+        console.error('[download] Instagram returned no playable URL:', JSON.stringify(data).slice(0, 300));
+        return NextResponse.json(
+          { error: 'Could not extract a video from this Instagram link. It may be private, download-restricted, or use licensed audio.' },
+          { status: 422 }
+        );
+      }
+
       // Transform response to match the expected format
       const result = {
         id: Date.now().toString(),
@@ -208,9 +223,9 @@ export async function POST(request: NextRequest) {
           nickname: 'Instagram User',
           avatarThumb: '',
         },
-        play: firstResult.url || '',
-        wmplay: firstResult.url || '',
-        hdplay: firstResult.url || '',
+        play: igUrl,
+        wmplay: igUrl,
+        hdplay: igUrl,
         duration: 0,
         size: 0,
       };
