@@ -1319,9 +1319,9 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
 
     // Right column reserved for the numbers; chart flexes into the middle
     const rightEdge = cardX + cardW - pad;
-    const rightColW = 190;
+    const rightColW = 158;
     const chartX = nameColX + nameColW + 26;
-    const chartW = rightEdge - rightColW - 22 - chartX;
+    const chartW = rightEdge - rightColW - 16 - chartX;
     const chartH = 96;
     const chartY = rowCY - chartH / 2;
 
