@@ -587,11 +587,13 @@ function TopArtistsList({
   showChartGrid = true,
   logoBelow = false,
   plainNumbers = false,
+  fitName = false,
 }: {
   artists: ArtistData[]
   showChartGrid?: boolean
   logoBelow?: boolean
   plainNumbers?: boolean
+  fitName?: boolean
 }) {
   const [idx, setIdx] = useState(0)
 
@@ -629,7 +631,7 @@ function TopArtistsList({
 
   return (
     <div style={{ width: '100%', padding: '0 56px', marginTop: 0 }}>
-      <CardContent key={`${a.name}-${safeIdx}`} artist={a} change={change} showChartGrid={showChartGrid} plainNumbers={plainNumbers} />
+      <CardContent key={`${a.name}-${safeIdx}`} artist={a} change={change} showChartGrid={showChartGrid} plainNumbers={plainNumbers} fitName={fitName} />
       {logoBelow && <LogoBelow />}
     </div>
   )
@@ -736,11 +738,13 @@ function CardContent({
   change,
   showChartGrid = true,
   plainNumbers = false,
+  fitName = false,
 }: {
   artist: ArtistData
   change: number | null
   showChartGrid?: boolean
   plainNumbers?: boolean
+  fitName?: boolean
 }) {
   const fallbackPrice = artist.index_price ?? 0
   const [drawingPrice, setDrawingPrice] = useState<number | null>(null)
@@ -796,7 +800,15 @@ function CardContent({
             }}
           />
         )}
-        <div style={{ minWidth: 0, flexShrink: 0, width: 110 }}>
+        <div
+          style={{
+            flexShrink: 0,
+            // With fitName on, the column sizes to the artist name (capped so
+            // the chart never collapses) and the chart flexes to fill the
+            // rest — so the graph width varies with how long the name is.
+            ...(fitName ? { maxWidth: 160 } : { minWidth: 0, width: 110 }),
+          }}
+        >
           <div
             style={{
               color: WHITE,
@@ -1544,7 +1556,7 @@ export default function LandingAnimations() {
 
           <Tile title="CTA animation 2">
             <div style={{ width: 560 }}>
-              <TopArtistsList artists={heroArtists} showChartGrid={false} logoBelow plainNumbers />
+              <TopArtistsList artists={heroArtists} showChartGrid={false} logoBelow plainNumbers fitName />
             </div>
           </Tile>
 
