@@ -26,7 +26,8 @@
     "next": "16.1.6",
     "probe-image-size": "^7.2.3",
     "react": "19.2.3",
-    "react-dom": "19.2.3"
+    "react-dom": "19.2.3",
+    "ruhend-scraper": "^10.0.3"
   },
   "devDependencies": {
     "@mswjs/http-middleware": "^0.10.3",

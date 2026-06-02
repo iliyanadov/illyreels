@@ -183,34 +183,51 @@ export async function POST(request: NextRequest) {
     }
 
     if (isInstagramUrl(trimmedUrl)) {
-      // Instagram has no single reliable free extractor, so we try two with
-      // different backends and take whichever first yields a playable URL:
-      //   1. btch-downloader's igdl
-      //   2. instagram-url-direct (catches some reels igdl can't)
-      // Reels that Instagram blocks for datacenter IPs (private/restricted, or
-      // anti-scraping) fail BOTH — those need a residential-proxy/paid API and
-      // surface a clear 422 below rather than a silent blank.
+      // Instagram has no single reliable free extractor, so we try several with
+      // DIFFERENT backends and take whichever first yields a playable URL:
+      //   1. ruhend-scraper igdl  — most capable in testing (gets reels the
+      //      others can't, incl. ones tikwm-style scrapers fail on)
+      //   2. btch-downloader igdl
+      //   3. instagram-url-direct
+      // Reels Instagram blocks for ALL of these (rare) surface a clear 422
+      // below rather than a silent blank / stuck spinner.
       let igUrl = '';
       let igCover = '';
 
-      // --- Attempt 1: igdl ---
+      // --- Attempt 1: ruhend-scraper igdl (returns an array of direct mp4 URLs) ---
       try {
-        const { igdl } = await import('btch-downloader');
-        const data = await igdl(trimmedUrl) as Awaited<ReturnType<InstagramDownloader>>;
-        const first = data?.result?.find(
-          (r) => r && typeof r.url === 'string' && /^https?:\/\//i.test(r.url)
-        );
-        if (first?.url) {
-          igUrl = first.url;
-          igCover = first.thumbnail || '';
+        const { igdl } = await import('ruhend-scraper');
+        const r: unknown = await igdl(trimmedUrl);
+        const candidate = Array.isArray(r) ? r[0] : undefined;
+        if (typeof candidate === 'string' && /^https?:\/\//i.test(candidate)) {
+          igUrl = candidate;
+          console.log('[download] Instagram fetched via ruhend-scraper');
         } else {
-          console.warn('[download] igdl returned no usable URL, trying fallback');
+          console.warn('[download] ruhend-scraper returned no usable URL, trying next');
         }
       } catch (e: any) {
-        console.warn('[download] igdl threw, trying fallback:', e?.message || e);
+        console.warn('[download] ruhend-scraper threw, trying next:', e?.message || e);
       }
 
-      // --- Attempt 2: instagram-url-direct (different backend) ---
+      // --- Attempt 2: btch-downloader igdl ---
+      if (!igUrl) {
+        try {
+          const { igdl } = await import('btch-downloader');
+          const data = await igdl(trimmedUrl) as Awaited<ReturnType<InstagramDownloader>>;
+          const first = data?.result?.find(
+            (r) => r && typeof r.url === 'string' && /^https?:\/\//i.test(r.url)
+          );
+          if (first?.url) {
+            igUrl = first.url;
+            igCover = first.thumbnail || '';
+            console.log('[download] Instagram fetched via btch-downloader');
+          }
+        } catch (e: any) {
+          console.warn('[download] btch-downloader threw, trying next:', e?.message || e);
+        }
+      }
+
+      // --- Attempt 3: instagram-url-direct (different backend) ---
       if (!igUrl) {
         try {
           const { instagramGetUrl } = await import('instagram-url-direct');
@@ -222,10 +239,10 @@ export async function POST(request: NextRequest) {
           if (typeof candidate === 'string' && /^https?:\/\//i.test(candidate)) {
             igUrl = candidate;
             igCover = videoDetail?.thumbnail || '';
-            console.log('[download] Instagram fetched via instagram-url-direct fallback');
+            console.log('[download] Instagram fetched via instagram-url-direct');
           }
         } catch (e: any) {
-          console.warn('[download] instagram-url-direct fallback failed:', e?.message || e);
+          console.warn('[download] instagram-url-direct failed:', e?.message || e);
         }
       }
 
