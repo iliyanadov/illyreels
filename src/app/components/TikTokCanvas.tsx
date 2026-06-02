@@ -20,19 +20,96 @@ type Handle = 'tl' | 'tc' | 'tr' | 'bl' | 'bc' | 'br' | 'move';
 interface Box { x: number; y: number; w: number; h: number }
 
 // Pure module-level function — no closure issues inside effects
-function calcVideoBox(vw: number, vh: number, currentBrand: string): Box {
+function calcVideoBox(vw: number, vh: number, currentBrand: string, reserveIndexBand = false): Box {
   const headerNet = BASE_HEADER_HEIGHT - 4; // 106px — header height minus its 4px overlap
-  const maxVideoH = currentBrand === 'forum'
-    ? CANVAS_H - headerNet - 30 - 90  // reserve space for gap + ribbon
-    : CANVAS_H;
+  const topReserve = currentBrand === 'forum' ? headerNet : 0;
+  const bottomReserve = currentBrand === 'forum' ? 30 + 90 : 0; // gap + ribbon
+  // The `index` CTA carousel renders a tall lockup below the video; shrink the
+  // video to reserve that band (mirrors how forum reserves its ribbon space).
+  const indexReserve = reserveIndexBand && currentBrand !== 'forum' ? INDEX_BAND_RESERVE : 0;
+  const maxVideoH = CANVAS_H - topReserve - bottomReserve - indexReserve;
   const scale = Math.min(VIDEO_TARGET_W / vw, maxVideoH / vh);
   const drawW = vw * scale;
   const drawH = vh * scale;
   const x = (CANVAS_W - drawW) / 2;
-  const y = currentBrand === 'forum'
-    ? headerNet + (maxVideoH - drawH) / 2
-    : (CANVAS_H - drawH) / 2;
+  const y = topReserve + (maxVideoH - drawH) / 2;
   return { x, y, w: drawW, h: drawH };
+}
+
+// ── `index` CTA carousel (ported from the landing "CTA animation 2") ─────────
+const INDEX_BAND_RESERVE = 360; // vertical space reserved below the video
+const INDEX_HERO_IDS = [
+  '3TVXtAsR1Inumwj472S9r4', // Drake
+  '53XhwfbYqKCa1cC15pYq2q', // Imagine Dragons
+  '06HL4z0CvFAxyc27GXpf02', // Taylor Swift
+  '2YZyLoL8N0Wb9xBt1NhZWg', // Kendrick Lamar
+  '6qqNVTkY8uBg9cP3Jd7DAH', // Billie Eilish
+];
+
+interface IndexDataPoint { index: number; timestamp: string }
+interface IndexArtist {
+  name: string;
+  data_points: IndexDataPoint[];
+  image_url?: string | null;
+  index_price?: number | null;
+  change_1m?: number | null;
+}
+
+const IDX_NEUTRAL = { r: 4, g: 223, b: 162 };
+const IDX_POSITIVE = { r: 4, g: 223, b: 162 };
+const IDX_NEGATIVE = { r: 255, g: 75, b: 75 };
+
+function idxLerp(a: number, b: number, t: number) { return a + (b - a) * t; }
+function idxLerpRGB(
+  from: { r: number; g: number; b: number },
+  to: { r: number; g: number; b: number },
+  t: number,
+) {
+  return `rgb(${Math.round(idxLerp(from.r, to.r, t))},${Math.round(idxLerp(from.g, to.g, t))},${Math.round(idxLerp(from.b, to.b, t))})`;
+}
+function idxRoundRectPath(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+function idxEllipsize(ctx: CanvasRenderingContext2D, text: string, maxW: number) {
+  if (ctx.measureText(text).width <= maxW) return text;
+  let t = text;
+  while (t.length > 1 && ctx.measureText(t + '…').width > maxW) t = t.slice(0, -1);
+  return t + '…';
+}
+// Project an artist's data_points into chart-local coords and measure the
+// polyline length (mirrors AboutChart on the landing page, with padY = 0).
+function idxBuildChart(data: IndexDataPoint[], W: number, H: number) {
+  let pts = data
+    .map((p) => ({ t: new Date(p.timestamp).getTime(), price: parseFloat(String(p.index)) }))
+    .filter((p) => !isNaN(p.t) && !isNaN(p.price))
+    .sort((a, b) => a.t - b.t);
+  if (pts.length < 2) return null;
+  if (pts.length > 300) {
+    const step = (pts.length - 1) / 299;
+    pts = Array.from({ length: 300 }, (_, i) => pts[Math.min(Math.round(i * step), pts.length - 1)]);
+  }
+  const prices = pts.map((p) => p.price);
+  const minP = Math.min(...prices);
+  const maxP = Math.max(...prices);
+  const pRange = maxP === minP ? 1 : maxP - minP;
+  const tStart = pts[0].t;
+  const tRange = (pts[pts.length - 1].t - tStart) || 1;
+  const proj = pts.map((p) => ({
+    x: ((p.t - tStart) / tRange) * W,
+    y: (1 - (p.price - minP) / pRange) * H,
+    price: p.price,
+  }));
+  let totalLen = 0;
+  for (let i = 1; i < proj.length; i++) {
+    totalLen += Math.hypot(proj[i].x - proj[i - 1].x, proj[i].y - proj[i - 1].y);
+  }
+  return { proj, totalLen, isPos: proj[proj.length - 1].price >= proj[0].price, firstPrice: proj[0].price };
 }
 
 const CURSORS: Record<Handle, string> = {
@@ -178,6 +255,10 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
   const polymarketImgRef = useRef<HTMLImageElement | null>(null);
   // Cached image for the kanye custom card
   const kanyeImgRef = useRef<HTMLImageElement | null>(null);
+  // `index` CTA carousel: hero artists + cached avatar images + Sonotrade logo
+  const [indexArtists, setIndexArtists] = useState<IndexArtist[]>([]);
+  const indexAvatarsRef = useRef<Map<string, HTMLImageElement>>(new Map());
+  const sonotradeLogoRef = useRef<HTMLImageElement | null>(null);
 
   // Pan offset for the underlying video (dragging moves the video, not the crop box)
   const videoOffsetRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -259,7 +340,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
       const vh = video.videoHeight;
       console.log('[Row ' + (rowNumber + 1) + '] Video loaded successfully:', { videoId, vw, vh, src: videoSrc });
       if (vw && vh) {
-        const b = calcVideoBox(vw, vh, brand);
+        const b = calcVideoBox(vw, vh, brand, tag?.toLowerCase() === 'index');
         boxRef.current = b;
         setBox(b);
         videoOffsetRef.current = { x: 0, y: 0 };
@@ -272,19 +353,54 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     return () => {
       video.removeEventListener('loadedmetadata', handleLoadedMetadata);
     };
-  }, [videoSrc, brand]);
+  }, [videoSrc, brand, tag]);
 
   // Reposition already-loaded video when brand changes
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !video.videoWidth || !video.videoHeight) return;
-    const b = calcVideoBox(video.videoWidth, video.videoHeight, brand);
+    const b = calcVideoBox(video.videoWidth, video.videoHeight, brand, tag?.toLowerCase() === 'index');
     boxRef.current = b;
     setBox(b);
     videoOffsetRef.current = { x: 0, y: 0 };
     videoScaleRef.current = 1;
     setVideoScale(1);
-  }, [brand]);
+  }, [brand, tag]);
+
+  // Fetch hero artists when the `index` CTA tag is active
+  useEffect(() => {
+    if (tag?.toLowerCase() !== 'index') return;
+    let cancelled = false;
+    Promise.all(
+      INDEX_HERO_IDS.map(async (id) => {
+        try {
+          const res = await fetch(`/api/artist/${encodeURIComponent(id)}?slim=true`);
+          if (!res.ok) return null;
+          const data = await res.json();
+          return data.artist as IndexArtist;
+        } catch {
+          return null;
+        }
+      }),
+    ).then((rs) => {
+      if (cancelled) return;
+      setIndexArtists(rs.filter(Boolean) as IndexArtist[]);
+    });
+    return () => { cancelled = true; };
+  }, [tag]);
+
+  // Preload avatars with crossOrigin so the export canvas is never tainted; a
+  // CORS failure simply never loads (naturalWidth stays 0) → grey placeholder.
+  useEffect(() => {
+    for (const a of indexArtists) {
+      if (a.image_url && !indexAvatarsRef.current.has(a.image_url)) {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.src = a.image_url;
+        indexAvatarsRef.current.set(a.image_url, img);
+      }
+    }
+  }, [indexArtists]);
 
   // Reset logo cache when logo source changes so next draw picks up the new image
   useEffect(() => {
@@ -1137,6 +1253,191 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     }
   }
 
+  // Animated CTA carousel for the `index` tag — a cycling artist index card
+  // (chart draws on + numbers count up) with the Sonotrade lockup below.
+  // Driven purely by `timeSeconds` so the preview and the export render
+  // identically (preview passes video.currentTime, export passes the frame time).
+  function drawIndexCarouselOnContext({ ctx, boxY, timeSeconds }: { ctx: CanvasRenderingContext2D; boxY: number; timeSeconds: number }): void {
+    const artists = indexArtists;
+    if (!artists.length) return;
+
+    const CYCLE_MS = 6750;
+    const DRAW_MS = 4500;
+    const tMs = timeSeconds * 1000;
+    const a = artists[Math.floor(tMs / CYCLE_MS) % artists.length];
+    const tRaw = Math.min((tMs % CYCLE_MS) / DRAW_MS, 1);
+    const progress = 1 - Math.pow(1 - tRaw, 2); // easeOutSoft
+
+    // ── Card shell ──
+    const cardX = 60;
+    const cardW = CANVAS_W - 120; // 960
+    const cardH = 176;
+    const cardY = boxY;
+    const pad = 32;
+    ctx.save();
+    idxRoundRectPath(ctx, cardX, cardY, cardW, cardH, 24);
+    ctx.fillStyle = 'rgba(255,255,255,0.02)';
+    ctx.fill();
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = '#27272a';
+    ctx.stroke();
+    ctx.restore();
+
+    const rowCY = cardY + cardH / 2;
+
+    // Avatar (80px circle, grey placeholder until cleanly loaded)
+    const avSize = 80;
+    const avX = cardX + pad;
+    const avY = rowCY - avSize / 2;
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(avX + avSize / 2, avY + avSize / 2, avSize / 2, 0, Math.PI * 2);
+    ctx.closePath();
+    ctx.clip();
+    const avImg = a.image_url ? indexAvatarsRef.current.get(a.image_url) : undefined;
+    if (avImg && avImg.complete && avImg.naturalWidth > 0) {
+      ctx.drawImage(avImg, avX, avY, avSize, avSize);
+    } else {
+      ctx.fillStyle = '#3f3f46';
+      ctx.fillRect(avX, avY, avSize, avSize);
+    }
+    ctx.restore();
+
+    // Name + "Index" label (column sizes to the name, capped)
+    const nameColX = avX + avSize + 24;
+    const nameMaxW = 300;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+    ctx.font = '500 28px system-ui, sans-serif';
+    const fullNameW = ctx.measureText(a.name || '').width;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(idxEllipsize(ctx, a.name || '', nameMaxW), nameColX, rowCY - 6);
+    ctx.font = '400 24px system-ui, sans-serif';
+    ctx.fillStyle = '#a1a1aa';
+    ctx.fillText('Index', nameColX, rowCY + 28);
+    const nameColW = Math.min(fullNameW, nameMaxW);
+
+    // Right column reserved for the numbers; chart flexes into the middle
+    const rightEdge = cardX + cardW - pad;
+    const rightColW = 200;
+    const chartX = nameColX + nameColW + 28;
+    const chartW = rightEdge - rightColW - 24 - chartX;
+    const chartH = 112;
+    const chartY = rowCY - chartH / 2;
+
+    let dotPrice = a.index_price ?? 0;
+    let pct = 0;
+    const geom = chartW > 10 ? idxBuildChart(a.data_points || [], chartW, chartH) : null;
+    if (geom) {
+      const { proj, totalLen, isPos, firstPrice } = geom;
+      const drawn = totalLen * progress;
+      const colorT = Math.max(0, Math.min(1, (progress - 0.1) / 0.7));
+      const color = idxLerpRGB(IDX_NEUTRAL, isPos ? IDX_POSITIVE : IDX_NEGATIVE, colorT);
+      ctx.save();
+      ctx.translate(chartX, chartY);
+      ctx.beginPath();
+      ctx.moveTo(proj[0].x, proj[0].y);
+      let acc = 0;
+      let dot = { x: proj[proj.length - 1].x, y: proj[proj.length - 1].y, price: proj[proj.length - 1].price };
+      for (let i = 1; i < proj.length; i++) {
+        const prev = proj[i - 1];
+        const cur = proj[i];
+        const seg = Math.hypot(cur.x - prev.x, cur.y - prev.y);
+        if (acc + seg >= drawn) {
+          const tt = seg > 0 ? (drawn - acc) / seg : 0;
+          dot = {
+            x: prev.x + tt * (cur.x - prev.x),
+            y: prev.y + tt * (cur.y - prev.y),
+            price: prev.price + tt * (cur.price - prev.price),
+          };
+          ctx.lineTo(dot.x, dot.y);
+          break;
+        }
+        ctx.lineTo(cur.x, cur.y);
+        acc += seg;
+      }
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 3;
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(dot.x, dot.y, 7, 0, Math.PI * 2);
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.restore();
+      dotPrice = dot.price;
+      pct = firstPrice > 0 ? ((dot.price - firstPrice) / firstPrice) * 100 : 0;
+    }
+
+    // Points value + "points" suffix (right-aligned)
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'alphabetic';
+    ctx.font = '400 18px system-ui, sans-serif';
+    ctx.fillStyle = '#a1a1aa';
+    ctx.fillText('points', rightEdge, rowCY - 14);
+    const ptsLabelW = ctx.measureText('points').width;
+    ctx.font = '400 26px system-ui, sans-serif';
+    ctx.fillText(
+      dotPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+      rightEdge - ptsLabelW - 8,
+      rowCY - 14,
+    );
+
+    // Percent + triangle (green up / red down)
+    const isUp = pct >= 0;
+    const pctColor = isUp ? '#04df9d' : '#FF4B4B';
+    const pctStr = Math.abs(pct).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '%';
+    ctx.font = '500 26px system-ui, sans-serif';
+    ctx.fillStyle = pctColor;
+    ctx.fillText(pctStr, rightEdge, rowCY + 30);
+    const pctW = ctx.measureText(pctStr).width;
+    const triS = 16;
+    const triX = rightEdge - pctW - 10 - triS;
+    const triTop = rowCY + 30 - 20;
+    ctx.beginPath();
+    if (isUp) {
+      ctx.moveTo(triX + triS / 2, triTop);
+      ctx.lineTo(triX + triS, triTop + triS);
+      ctx.lineTo(triX, triTop + triS);
+    } else {
+      ctx.moveTo(triX, triTop);
+      ctx.lineTo(triX + triS, triTop);
+      ctx.lineTo(triX + triS / 2, triTop + triS);
+    }
+    ctx.closePath();
+    ctx.fill();
+
+    // ── Sonotrade lockup below the card ──
+    let logo = sonotradeLogoRef.current;
+    if (!logo) {
+      logo = new Image();
+      logo.src = '/sonotradelogoname.png';
+      sonotradeLogoRef.current = logo;
+    }
+    const winW = 312;
+    const winH = 96;
+    const gap = 20;
+    ctx.font = '500 28px system-ui, sans-serif';
+    const linkText = 'Link in bio';
+    const linkW = ctx.measureText(linkText).width;
+    const groupX = (CANVAS_W - (winW + gap + linkW)) / 2;
+    const lockupY = cardY + cardH + 48;
+    if (logo.complete && logo.naturalWidth > 0) {
+      // The asset is a 1080×1350 poster with the wordmark centered in empty
+      // space; crop to that band (source y 509, height 332) so it shows large.
+      ctx.drawImage(logo, 0, 509, 1080, 332, groupX, lockupY, winW, winH);
+    }
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(linkText, groupX + winW + gap, lockupY + winH / 2);
+
+    // Reset text defaults for subsequent draws
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+  }
+
   // ── Draw loop (black bg + global header + cropped video) ─────────────────────
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -1190,8 +1491,8 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
         ctx.drawImage(video, dx, dy, drawW, drawH);
         ctx.restore();
 
-        // Draw brand element below the video (skip for empty mode, except betonline/polymarket)
-        if (brand !== 'empty' || (brand === 'empty' && (tag?.toLowerCase() === 'betonline' || tag?.toLowerCase() === 'polymarket'))) {
+        // Draw brand element below the video (skip for empty mode, except betonline/polymarket/index)
+        if (brand !== 'empty' || (brand === 'empty' && (tag?.toLowerCase() === 'betonline' || tag?.toLowerCase() === 'polymarket' || tag?.toLowerCase() === 'index'))) {
           if (brand === 'forum') {
             drawForumBannerOnContext({ ctx, boxY: y + h + 30 });
           } else if (brand === 'culturesparadox' && tag?.toLowerCase() === 'duelrocket') {
@@ -1205,6 +1506,13 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
             // Works for both culturesparadox and empty brands
             // Overlap video by 15px (move banner up)
             drawPolymarketBannerOnContext({ ctx, boxY: y + h - 15 });
+          } else if (tag?.toLowerCase() === 'index') {
+            // Drive the carousel off the video clock; while paused (the default
+            // preview state) fall back to wall-clock so it still animates.
+            const idxTime = !video.paused && isFinite(video.currentTime)
+              ? video.currentTime
+              : performance.now() / 1000;
+            drawIndexCarouselOnContext({ ctx, boxY: y + h + 30, timeSeconds: idxTime });
           } else if (brand !== 'empty') {
             drawMarketCardOnContext({ ctx, boxY: y + h + 30 });
           }
@@ -1220,7 +1528,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     }
     draw();
     return () => { active = false; cancelAnimationFrame(raf.current); };
-  }, [videoSrc, overlayDisplayName, overlayHandle, overlayDate, overlayVerified, overlayCaption, videoScale, marketData, brand, overlayChange, tag]);
+  }, [videoSrc, overlayDisplayName, overlayHandle, overlayDate, overlayVerified, overlayCaption, videoScale, marketData, brand, overlayChange, tag, indexArtists]);
 
   // ── Pinch-to-zoom (wheel/trackpad + touch gestures) ──────────────────────────
   useEffect(() => {
@@ -1439,7 +1747,8 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     // DuelRocket: 385px height (1027 * 720/1920) minus 15px overlap = 370px effective
     // BetOnline: 152px height (2021 * 720/9603) minus 15px overlap = 137px effective
     // Polymarket: 78px height (153 * 720/1407) minus 15px overlap = 63px effective
-    const marketBoxHeight = hasMarketBox ? 140 + 30 : hasDuelrocketBanner ? 385 - 15 : hasBetonlineBanner ? 152 - 15 : hasPolymarketBanner ? 78 - 15 : 0;
+    const hasIndexCarousel = tag?.toLowerCase() === 'index';
+    const marketBoxHeight = hasIndexCarousel ? INDEX_BAND_RESERVE : hasMarketBox ? 140 + 30 : hasDuelrocketBanner ? 385 - 15 : hasBetonlineBanner ? 152 - 15 : hasPolymarketBanner ? 78 - 15 : 0;
 
     // Total content height
     const totalHeight = headerHeight + cropBoxHeight + marketBoxHeight;
@@ -2267,8 +2576,8 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
         // @ts-ignore - OffscreenCanvasRenderingContext2D is compatible for our use
         drawHeaderOnContext({ ctx: offscreenCtx, cx: 0, cy: headerY, cw: CANVAS_W, countCaptionLinesFn: countCaptionLines });
 
-        // Draw brand element below video (exact match with main canvas, skip for empty mode except betonline/polymarket)
-        if (brand !== 'empty' || (brand === 'empty' && (tag?.toLowerCase() === 'betonline' || tag?.toLowerCase() === 'polymarket'))) {
+        // Draw brand element below video (exact match with main canvas, skip for empty mode except betonline/polymarket/index)
+        if (brand !== 'empty' || (brand === 'empty' && (tag?.toLowerCase() === 'betonline' || tag?.toLowerCase() === 'polymarket' || tag?.toLowerCase() === 'index'))) {
           if (brand === 'forum') {
             // @ts-ignore - OffscreenCanvasRenderingContext2D is compatible for our use
             drawForumBannerOnContext({ ctx: offscreenCtx, boxY: box.y + box.h + 30 });
@@ -2284,6 +2593,10 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
             // Overlap video by 15px (move banner up)
             // @ts-ignore - OffscreenCanvasRenderingContext2D is compatible for our use
             drawPolymarketBannerOnContext({ ctx: offscreenCtx, boxY: box.y + box.h - 15 });
+          } else if (tag?.toLowerCase() === 'index') {
+            // Deterministic clock: targetTimestamp is this frame's time in seconds
+            // @ts-ignore - OffscreenCanvasRenderingContext2D is compatible for our use
+            drawIndexCarouselOnContext({ ctx: offscreenCtx, boxY: box.y + box.h + 30, timeSeconds: targetTimestamp });
           } else if (brand !== 'empty') {
             // @ts-ignore - OffscreenCanvasRenderingContext2D is compatible for our use
             drawMarketCardOnContext({ ctx: offscreenCtx, boxY: box.y + box.h + 30 });

@@ -395,7 +395,7 @@ export default function Home() {
 
     // Set loading state for both video and market (skip market in forum mode)
     setEntries(prev => prev.map(e =>
-      e.id === id ? { ...e, loading: true, loadingMarket: brandMode !== 'forum' && !!e.tag.trim(), error: '', data: null, marketData: null, marketError: '', videoFailed: false } : e
+      e.id === id ? { ...e, loading: true, loadingMarket: brandMode !== 'forum' && !!e.tag.trim() && e.tag.trim().toLowerCase() !== 'index', error: '', data: null, marketData: null, marketError: '', videoFailed: false } : e
     ));
 
     try {
@@ -426,7 +426,9 @@ export default function Home() {
 
     // Fetch market data if tag is present (skip in forum mode)
     const entry = entriesRef.current.find(e => e.id === id);
-    if (brandMode !== 'forum' && entry?.tag.trim()) {
+    // `index` is a CTA-carousel tag, not a market tag — skip the market lookup
+    // (otherwise it would surface a spurious "Unknown tag: index" error).
+    if (brandMode !== 'forum' && entry?.tag.trim() && entry.tag.trim().toLowerCase() !== 'index') {
       const tag = entry.tag.trim().toLowerCase();
       const eventId = TAG_TO_EVENT_ID[tag];
 
