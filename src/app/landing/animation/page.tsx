@@ -582,7 +582,7 @@ function FoundationsGraphic({ artists }: { artists: ArtistData[] }) {
 //   TopArtistsList — cycles through the hero artists every 3s
 // ───────────────────────────────────────────────────────────────────────────
 
-function TopArtistsList({ artists }: { artists: ArtistData[] }) {
+function TopArtistsList({ artists, showChartGrid = true }: { artists: ArtistData[]; showChartGrid?: boolean }) {
   const [idx, setIdx] = useState(0)
 
   useEffect(() => {
@@ -617,7 +617,7 @@ function TopArtistsList({ artists }: { artists: ArtistData[] }) {
 
   return (
     <div style={{ width: '100%', padding: '0 56px', marginTop: 0 }}>
-      <CardContent key={`${a.name}-${safeIdx}`} artist={a} change={change} />
+      <CardContent key={`${a.name}-${safeIdx}`} artist={a} change={change} showChartGrid={showChartGrid} />
     </div>
   )
 }
@@ -668,9 +668,11 @@ function LogoSlide() {
 function CardContent({
   artist,
   change,
+  showChartGrid = true,
 }: {
   artist: ArtistData
   change: number | null
+  showChartGrid?: boolean
 }) {
   const fallbackPrice = artist.index_price ?? 0
   const [drawingPrice, setDrawingPrice] = useState<number | null>(null)
@@ -747,10 +749,14 @@ function CardContent({
             flex: 1,
             minWidth: 0,
             height: 56,
-            border: '1px dashed rgba(255,0,255,0.55)',
-            backgroundImage:
-              'linear-gradient(to right, rgba(255,0,255,0.18) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,0,255,0.18) 1px, transparent 1px)',
-            backgroundSize: '10px 10px',
+            ...(showChartGrid
+              ? {
+                  border: '1px dashed rgba(255,0,255,0.55)',
+                  backgroundImage:
+                    'linear-gradient(to right, rgba(255,0,255,0.18) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,0,255,0.18) 1px, transparent 1px)',
+                  backgroundSize: '10px 10px',
+                }
+              : {}),
           }}
         >
           <AboutChart
@@ -1439,6 +1445,12 @@ export default function LandingAnimations() {
           <Tile title="CTA animation">
             <div style={{ width: 560 }}>
               <TopArtistsList artists={heroArtists} />
+            </div>
+          </Tile>
+
+          <Tile title="CTA animation 2">
+            <div style={{ width: 560 }}>
+              <TopArtistsList artists={heroArtists} showChartGrid={false} />
             </div>
           </Tile>
 
