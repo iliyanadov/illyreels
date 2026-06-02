@@ -586,10 +586,12 @@ function TopArtistsList({
   artists,
   showChartGrid = true,
   logoBelow = false,
+  plainNumbers = false,
 }: {
   artists: ArtistData[]
   showChartGrid?: boolean
   logoBelow?: boolean
+  plainNumbers?: boolean
 }) {
   const [idx, setIdx] = useState(0)
 
@@ -627,7 +629,7 @@ function TopArtistsList({
 
   return (
     <div style={{ width: '100%', padding: '0 56px', marginTop: 0 }}>
-      <CardContent key={`${a.name}-${safeIdx}`} artist={a} change={change} showChartGrid={showChartGrid} />
+      <CardContent key={`${a.name}-${safeIdx}`} artist={a} change={change} showChartGrid={showChartGrid} plainNumbers={plainNumbers} />
       {logoBelow && <LogoBelow />}
     </div>
   )
@@ -733,14 +735,24 @@ function CardContent({
   artist,
   change,
   showChartGrid = true,
+  plainNumbers = false,
 }: {
   artist: ArtistData
   change: number | null
   showChartGrid?: boolean
+  plainNumbers?: boolean
 }) {
   const fallbackPrice = artist.index_price ?? 0
   const [drawingPrice, setDrawingPrice] = useState<number | null>(null)
   const [drawingPercent, setDrawingPercent] = useState<number | null>(null)
+  // Plain (odometer-free) formatter used by CTA animation 2 — matches
+  // NumberFlow's grouped, 2-decimal output. The value already updates every
+  // animation frame, so rendering it directly reads as a smooth count.
+  const fmtNum = (n: number) =>
+    n.toLocaleString('en-US', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })
 
   return (
     <div
@@ -845,14 +857,25 @@ function CardContent({
             width: 92,
           }}
         >
-          <span style={{ color: SEC, fontFamily: FONT, fontSize: 12 }}>
-            <NumberFlow
-              value={drawingPrice ?? fallbackPrice}
-              format={{
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2,
-              }}
-            />
+          <span
+            style={{
+              color: SEC,
+              fontFamily: FONT,
+              fontSize: 12,
+              fontVariantNumeric: 'tabular-nums',
+            }}
+          >
+            {plainNumbers ? (
+              fmtNum(drawingPrice ?? fallbackPrice)
+            ) : (
+              <NumberFlow
+                value={drawingPrice ?? fallbackPrice}
+                format={{
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                }}
+              />
+            )}
             <span style={{ fontSize: 10, marginLeft: 4, fontWeight: 400 }}>
               points
             </span>
@@ -877,18 +900,25 @@ function CardContent({
                   fontFamily: FONT,
                   fontSize: 12,
                   fontWeight: 500,
+                  fontVariantNumeric: 'tabular-nums',
                 }}
               >
-                <NumberFlow
-                  value={
-                    drawingPercent != null ? Math.abs(drawingPercent) : 0
-                  }
-                  format={{
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  }}
-                  suffix="%"
-                />
+                {plainNumbers ? (
+                  `${fmtNum(
+                    drawingPercent != null ? Math.abs(drawingPercent) : 0,
+                  )}%`
+                ) : (
+                  <NumberFlow
+                    value={
+                      drawingPercent != null ? Math.abs(drawingPercent) : 0
+                    }
+                    format={{
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    }}
+                    suffix="%"
+                  />
+                )}
               </span>
             </div>
           )}
@@ -1514,7 +1544,7 @@ export default function LandingAnimations() {
 
           <Tile title="CTA animation 2">
             <div style={{ width: 560 }}>
-              <TopArtistsList artists={heroArtists} showChartGrid={false} logoBelow />
+              <TopArtistsList artists={heroArtists} showChartGrid={false} logoBelow plainNumbers />
             </div>
           </Tile>
 
