@@ -20,6 +20,7 @@
     "btch-downloader": "^6.0.25",
     "google-auth-library": "^9.15.1",
     "googleapis": "^144.0.0",
+    "instagram-url-direct": "^2.0.7",
     "mediabunny": "^1.35.1",
     "mp4box": "^0.5.4",
     "next": "16.1.6",

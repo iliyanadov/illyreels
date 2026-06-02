@@ -29,6 +29,7 @@ const ALLOWED_HOSTS = [
   'rapidcdn.app',
   'd.rapidcdn.app',
   'cdninstagram.com',
+  'fbcdn.net',
   'instagram.com',
 ];
 

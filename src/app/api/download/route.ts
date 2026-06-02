@@ -183,30 +183,55 @@ export async function POST(request: NextRequest) {
     }
 
     if (isInstagramUrl(trimmedUrl)) {
-      // Dynamic import for CommonJS module
-      const { igdl } = await import('btch-downloader');
+      // Instagram has no single reliable free extractor, so we try two with
+      // different backends and take whichever first yields a playable URL:
+      //   1. btch-downloader's igdl
+      //   2. instagram-url-direct (catches some reels igdl can't)
+      // Reels that Instagram blocks for datacenter IPs (private/restricted, or
+      // anti-scraping) fail BOTH — those need a residential-proxy/paid API and
+      // surface a clear 422 below rather than a silent blank.
+      let igUrl = '';
+      let igCover = '';
 
-      // Add timeout for Instagram fetch
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT);
-
-      const data = await igdl(trimmedUrl) as Awaited<ReturnType<InstagramDownloader>>;
-      clearTimeout(timeoutId);
-
-      if (!data.result || data.result.length === 0) {
-        return NextResponse.json({ error: data.error || 'Failed to fetch Instagram media' }, { status: 400 });
+      // --- Attempt 1: igdl ---
+      try {
+        const { igdl } = await import('btch-downloader');
+        const data = await igdl(trimmedUrl) as Awaited<ReturnType<InstagramDownloader>>;
+        const first = data?.result?.find(
+          (r) => r && typeof r.url === 'string' && /^https?:\/\//i.test(r.url)
+        );
+        if (first?.url) {
+          igUrl = first.url;
+          igCover = first.thumbnail || '';
+        } else {
+          console.warn('[download] igdl returned no usable URL, trying fallback');
+        }
+      } catch (e: any) {
+        console.warn('[download] igdl threw, trying fallback:', e?.message || e);
       }
 
-      const firstResult = data.result[0];
-      const igUrl = firstResult.url || '';
+      // --- Attempt 2: instagram-url-direct (different backend) ---
+      if (!igUrl) {
+        try {
+          const { instagramGetUrl } = await import('instagram-url-direct');
+          const r = await instagramGetUrl(trimmedUrl);
+          const videoDetail = (r.media_details || []).find(
+            (m: any) => m?.type === 'video' && typeof m.url === 'string'
+          );
+          const candidate = videoDetail?.url || (r.url_list || [])[0];
+          if (typeof candidate === 'string' && /^https?:\/\//i.test(candidate)) {
+            igUrl = candidate;
+            igCover = videoDetail?.thumbnail || '';
+            console.log('[download] Instagram fetched via instagram-url-direct fallback');
+          }
+        } catch (e: any) {
+          console.warn('[download] instagram-url-direct fallback failed:', e?.message || e);
+        }
+      }
 
-      // The downloader sometimes returns a result entry with NO usable URL
-      // (private/restricted/trial reel, licensed audio, or the scraper is
-      // degraded). Don't hand back a 200 with empty play fields — that becomes a
-      // video element with no source and an infinite "Loading…" spinner. Fail
-      // explicitly so the UI shows a real error.
+      // Both extractors failed — fail explicitly (no silent blank / stuck spinner).
       if (!/^https?:\/\//i.test(igUrl)) {
-        console.error('[download] Instagram returned no playable URL:', JSON.stringify(data).slice(0, 300));
+        console.error('[download] Instagram: no playable URL from either extractor for', trimmedUrl);
         return NextResponse.json(
           { error: 'Could not extract a video from this Instagram link. It may be private, download-restricted, or use licensed audio.' },
           { status: 422 }
@@ -217,7 +242,7 @@ export async function POST(request: NextRequest) {
       const result = {
         id: Date.now().toString(),
         title: '',
-        cover: firstResult.thumbnail || '',
+        cover: igCover,
         author: {
           uniqueId: 'instagram',
           nickname: 'Instagram User',
