@@ -1347,7 +1347,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     const rowCY = cardY + cardH / 2;
 
     // Avatar (circle, grey placeholder until cleanly loaded)
-    const avSize = 47;
+    const avSize = 56;
     const avX = cardX + pad;
     const avY = rowCY - avSize / 2;
     ctx.save();
@@ -1366,16 +1366,16 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
 
     // Name + "Index" label (column sizes to the name, capped)
     const nameColX = avX + avSize + 16;
-    const nameMaxW = 189;
+    const nameMaxW = 227;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'alphabetic';
-    ctx.font = '500 17px system-ui, sans-serif';
+    ctx.font = '500 20px system-ui, sans-serif';
     const fullNameW = ctx.measureText(a.name || '').width;
     ctx.fillStyle = '#ffffff';
-    ctx.fillText(idxEllipsize(ctx, a.name || '', nameMaxW), nameColX, rowCY - 4);
-    ctx.font = '400 13px system-ui, sans-serif';
+    ctx.fillText(idxEllipsize(ctx, a.name || '', nameMaxW), nameColX, rowCY - 5);
+    ctx.font = '400 16px system-ui, sans-serif';
     ctx.fillStyle = '#a1a1aa';
-    ctx.fillText('Index', nameColX, rowCY + 16);
+    ctx.fillText('Index', nameColX, rowCY + 19);
     const nameColW = Math.min(fullNameW, nameMaxW);
 
     // Right column reserved for the numbers; chart flexes into the middle
@@ -1434,29 +1434,29 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     // Points value + "points" suffix (right-aligned)
     ctx.textAlign = 'right';
     ctx.textBaseline = 'alphabetic';
-    ctx.font = '400 10px system-ui, sans-serif';
+    ctx.font = '400 12px system-ui, sans-serif';
     ctx.fillStyle = '#a1a1aa';
-    ctx.fillText('points', rightEdge, rowCY - 8);
+    ctx.fillText('points', rightEdge, rowCY - 10);
     const ptsLabelW = ctx.measureText('points').width;
-    ctx.font = '400 16px system-ui, sans-serif';
+    ctx.font = '400 19px system-ui, sans-serif';
     ctx.fillText(
       dotPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
-      rightEdge - ptsLabelW - 6,
-      rowCY - 8,
+      rightEdge - ptsLabelW - 7,
+      rowCY - 10,
     );
 
     // Percent + triangle (green up / red down) — wider, shorter base
     const isUp = pct >= 0;
     const pctColor = isUp ? '#04df9d' : '#FF4B4B';
     const pctStr = Math.abs(pct).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '%';
-    ctx.font = '500 16px system-ui, sans-serif';
+    ctx.font = '500 19px system-ui, sans-serif';
     ctx.fillStyle = pctColor;
-    ctx.fillText(pctStr, rightEdge, rowCY + 16);
+    ctx.fillText(pctStr, rightEdge, rowCY + 19);
     const pctW = ctx.measureText(pctStr).width;
-    const triW = 13;
-    const triH = 10.5;
-    const triX = rightEdge - pctW - 6 - triW;
-    const triTop = rowCY + 6;
+    const triW = 16;
+    const triH = 12.6;
+    const triX = rightEdge - pctW - 7 - triW;
+    const triTop = rowCY + 7;
     ctx.beginPath();
     if (isUp) {
       ctx.moveTo(triX + triW / 2, triTop);
