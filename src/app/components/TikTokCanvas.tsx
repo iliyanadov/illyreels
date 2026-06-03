@@ -1429,7 +1429,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     const pctW = ctx.measureText(pctStr).width;
     const triS = 15;
     const triX = rightEdge - pctW - 9 - triS;
-    const triTop = rowCY + 24 - 18;
+    const triTop = rowCY + 24 - 16;
     ctx.beginPath();
     if (isUp) {
       ctx.moveTo(triX + triS / 2, triTop);
