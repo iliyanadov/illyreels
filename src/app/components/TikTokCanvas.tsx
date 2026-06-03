@@ -1271,7 +1271,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     // ── Card shell ──
     const cardX = 60;
     const cardW = CANVAS_W - 120; // 960
-    const cardH = 156;
+    const cardH = 140;
     const cardY = boxY;
     const pad = 26;
     ctx.save();
@@ -1322,7 +1322,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     const rightColW = 158;
     const chartX = nameColX + nameColW + 26;
     const chartW = rightEdge - rightColW - 16 - chartX;
-    const chartH = 96;
+    const chartH = 86;
     const chartY = rowCY - chartH / 2;
 
     let dotPrice = a.index_price ?? 0;
@@ -1415,14 +1415,14 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
       logo.src = '/sonotradelogoname.png';
       sonotradeLogoRef.current = logo;
     }
-    const winW = 176;
-    const winH = 54;
+    const winW = 158;
+    const winH = 49;
     const gap = 16;
     ctx.font = '500 26px system-ui, sans-serif';
     const linkText = 'Link in bio';
     const linkW = ctx.measureText(linkText).width;
     const groupX = (CANVAS_W - (winW + gap + linkW)) / 2;
-    const lockupY = cardY + cardH + 14;
+    const lockupY = cardY + cardH + 13;
     if (logo.complete && logo.naturalWidth > 0) {
       // The asset is a 1080×1350 poster with the wordmark centered in empty
       // space; crop to that band (source y 509, height 332) so it shows large.
