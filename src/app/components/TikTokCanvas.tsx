@@ -1276,9 +1276,9 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     const pad = 26;
     ctx.save();
     idxRoundRectPath(ctx, cardX, cardY, cardW, cardH, 22);
-    // Grey card matching CTA animation 2: that card composites to ~rgb(20,20,20)
-    // on its layered dark page; over the reel's pure-black canvas that's 0.08.
-    ctx.fillStyle = 'rgba(255,255,255,0.08)';
+    // Grey card, a touch darker than CTA animation 2's ~rgb(20,20,20): over
+    // the reel's pure-black canvas 0.06 white composites to ~rgb(15,15,15).
+    ctx.fillStyle = 'rgba(255,255,255,0.06)';
     ctx.fill();
     ctx.lineWidth = 4;
     ctx.strokeStyle = '#27272a';
@@ -1514,7 +1514,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
             const idxTime = !video.paused && isFinite(video.currentTime)
               ? video.currentTime
               : performance.now() / 1000;
-            drawIndexCarouselOnContext({ ctx, boxY: y + h + 12, timeSeconds: idxTime });
+            drawIndexCarouselOnContext({ ctx, boxY: y + h + 30, timeSeconds: idxTime });
           } else if (brand !== 'empty') {
             drawMarketCardOnContext({ ctx, boxY: y + h + 30 });
           }
@@ -2598,7 +2598,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
           } else if (tag?.toLowerCase() === 'index') {
             // Deterministic clock: targetTimestamp is this frame's time in seconds
             // @ts-ignore - OffscreenCanvasRenderingContext2D is compatible for our use
-            drawIndexCarouselOnContext({ ctx: offscreenCtx, boxY: box.y + box.h + 12, timeSeconds: targetTimestamp });
+            drawIndexCarouselOnContext({ ctx: offscreenCtx, boxY: box.y + box.h + 30, timeSeconds: targetTimestamp });
           } else if (brand !== 'empty') {
             // @ts-ignore - OffscreenCanvasRenderingContext2D is compatible for our use
             drawMarketCardOnContext({ ctx: offscreenCtx, boxY: box.y + box.h + 30 });
