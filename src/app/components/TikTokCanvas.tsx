@@ -1285,8 +1285,8 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     const artists = indexArtists;
     if (!artists.length) return;
 
-    const CYCLE_MS = 6250; // 2s draw + 4.25s hold
-    const DRAW_MS = 2000;
+    const CYCLE_MS = 4000; // 1s draw + 3s hold
+    const DRAW_MS = 1000;
     const tMs = timeSeconds * 1000;
     const a = artists[Math.floor(tMs / CYCLE_MS) % artists.length];
     const cycleElapsed = tMs % CYCLE_MS;
