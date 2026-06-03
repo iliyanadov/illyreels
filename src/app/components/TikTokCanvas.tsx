@@ -1276,7 +1276,9 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     const pad = 26;
     ctx.save();
     idxRoundRectPath(ctx, cardX, cardY, cardW, cardH, 22);
-    ctx.fillStyle = 'rgba(255,255,255,0.02)';
+    // Grey card matching CTA animation 2: that card composites to ~rgb(20,20,20)
+    // on its layered dark page; over the reel's pure-black canvas that's 0.08.
+    ctx.fillStyle = 'rgba(255,255,255,0.08)';
     ctx.fill();
     ctx.lineWidth = 4;
     ctx.strokeStyle = '#27272a';
