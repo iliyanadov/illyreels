@@ -1297,23 +1297,23 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     // new card fades in and slides up ~16px over 0.6s with the same easing.
     const fade = idxBezier(Math.min(cycleElapsed / 600, 1), 0.25, 0.46, 0.45, 0.94);
 
-    // ── Card shell ──
-    const cardX = 60;
-    const cardW = CANVAS_W - 120; // 960
-    const cardH = 140;
+    // ── Card shell (≈30% narrower than full width; contents scaled to match) ──
+    const cardW = 672; // ~30% narrower than the old 960
+    const cardX = (CANVAS_W - cardW) / 2; // centered → 204
+    const cardH = 140; // height unchanged
     const cardY = boxY;
-    const pad = 26;
+    const pad = 18;
     // Fade-up wraps the whole card; the logo lockup below stays static.
     ctx.save();
     ctx.globalAlpha = fade;
     ctx.translate(0, (1 - fade) * 16);
     ctx.save();
-    idxRoundRectPath(ctx, cardX, cardY, cardW, cardH, 22);
+    idxRoundRectPath(ctx, cardX, cardY, cardW, cardH, 16);
     // Grey card, a touch darker than CTA animation 2's ~rgb(20,20,20): over
     // the reel's pure-black canvas 0.06 white composites to ~rgb(15,15,15).
     ctx.fillStyle = 'rgba(255,255,255,0.06)';
     ctx.fill();
-    ctx.lineWidth = 4;
+    ctx.lineWidth = 3;
     ctx.strokeStyle = '#27272a';
     ctx.stroke();
     ctx.restore();
@@ -1321,7 +1321,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     const rowCY = cardY + cardH / 2;
 
     // Avatar (circle, grey placeholder until cleanly loaded)
-    const avSize = 70;
+    const avSize = 49;
     const avX = cardX + pad;
     const avY = rowCY - avSize / 2;
     ctx.save();
@@ -1339,25 +1339,25 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     ctx.restore();
 
     // Name + "Index" label (column sizes to the name, capped)
-    const nameColX = avX + avSize + 22;
-    const nameMaxW = 270;
+    const nameColX = avX + avSize + 16;
+    const nameMaxW = 189;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'alphabetic';
-    ctx.font = '500 26px system-ui, sans-serif';
+    ctx.font = '500 18px system-ui, sans-serif';
     const fullNameW = ctx.measureText(a.name || '').width;
     ctx.fillStyle = '#ffffff';
-    ctx.fillText(idxEllipsize(ctx, a.name || '', nameMaxW), nameColX, rowCY - 6);
-    ctx.font = '400 20px system-ui, sans-serif';
+    ctx.fillText(idxEllipsize(ctx, a.name || '', nameMaxW), nameColX, rowCY - 4);
+    ctx.font = '400 14px system-ui, sans-serif';
     ctx.fillStyle = '#a1a1aa';
-    ctx.fillText('Index', nameColX, rowCY + 24);
+    ctx.fillText('Index', nameColX, rowCY + 17);
     const nameColW = Math.min(fullNameW, nameMaxW);
 
     // Right column reserved for the numbers; chart flexes into the middle
     const rightEdge = cardX + cardW - pad;
-    const rightColW = 158;
-    const chartX = nameColX + nameColW + 26;
-    const chartW = rightEdge - rightColW - 16 - chartX;
-    const chartH = 86;
+    const rightColW = 110;
+    const chartX = nameColX + nameColW + 18;
+    const chartW = rightEdge - rightColW - 11 - chartX;
+    const chartH = 60;
     const chartY = rowCY - chartH / 2;
 
     let dotPrice = a.index_price ?? 0;
@@ -1392,12 +1392,12 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
         acc += seg;
       }
       ctx.strokeStyle = color;
-      ctx.lineWidth = 3;
+      ctx.lineWidth = 2;
       ctx.lineJoin = 'round';
       ctx.lineCap = 'round';
       ctx.stroke();
       ctx.beginPath();
-      ctx.arc(dot.x, dot.y, 7, 0, Math.PI * 2);
+      ctx.arc(dot.x, dot.y, 5, 0, Math.PI * 2);
       ctx.fillStyle = color;
       ctx.fill();
       ctx.restore();
@@ -1408,37 +1408,38 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     // Points value + "points" suffix (right-aligned)
     ctx.textAlign = 'right';
     ctx.textBaseline = 'alphabetic';
-    ctx.font = '400 16px system-ui, sans-serif';
+    ctx.font = '400 11px system-ui, sans-serif';
     ctx.fillStyle = '#a1a1aa';
-    ctx.fillText('points', rightEdge, rowCY - 11);
+    ctx.fillText('points', rightEdge, rowCY - 8);
     const ptsLabelW = ctx.measureText('points').width;
-    ctx.font = '400 24px system-ui, sans-serif';
+    ctx.font = '400 17px system-ui, sans-serif';
     ctx.fillText(
       dotPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
-      rightEdge - ptsLabelW - 8,
-      rowCY - 11,
+      rightEdge - ptsLabelW - 6,
+      rowCY - 8,
     );
 
-    // Percent + triangle (green up / red down)
+    // Percent + triangle (green up / red down) — wider, shorter base
     const isUp = pct >= 0;
     const pctColor = isUp ? '#04df9d' : '#FF4B4B';
     const pctStr = Math.abs(pct).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '%';
-    ctx.font = '500 24px system-ui, sans-serif';
+    ctx.font = '500 17px system-ui, sans-serif';
     ctx.fillStyle = pctColor;
-    ctx.fillText(pctStr, rightEdge, rowCY + 24);
+    ctx.fillText(pctStr, rightEdge, rowCY + 17);
     const pctW = ctx.measureText(pctStr).width;
-    const triS = 15;
-    const triX = rightEdge - pctW - 9 - triS;
-    const triTop = rowCY + 24 - 16;
+    const triW = 13;
+    const triH = 8;
+    const triX = rightEdge - pctW - 6 - triW;
+    const triTop = rowCY + 7;
     ctx.beginPath();
     if (isUp) {
-      ctx.moveTo(triX + triS / 2, triTop);
-      ctx.lineTo(triX + triS, triTop + triS);
-      ctx.lineTo(triX, triTop + triS);
+      ctx.moveTo(triX + triW / 2, triTop);
+      ctx.lineTo(triX + triW, triTop + triH);
+      ctx.lineTo(triX, triTop + triH);
     } else {
       ctx.moveTo(triX, triTop);
-      ctx.lineTo(triX + triS, triTop);
-      ctx.lineTo(triX + triS / 2, triTop + triS);
+      ctx.lineTo(triX + triW, triTop);
+      ctx.lineTo(triX + triW / 2, triTop + triH);
     }
     ctx.closePath();
     ctx.fill();
