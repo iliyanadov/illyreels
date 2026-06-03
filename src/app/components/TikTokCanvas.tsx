@@ -1430,7 +1430,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     const triW = 13;
     const triH = 8;
     const triX = rightEdge - pctW - 6 - triW;
-    const triTop = rowCY + 7;
+    const triTop = rowCY + 10;
     ctx.beginPath();
     if (isUp) {
       ctx.moveTo(triX + triW / 2, triTop);
