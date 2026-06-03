@@ -1300,7 +1300,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     // ── Card shell (≈30% narrower than full width; contents scaled to match) ──
     const cardW = 672; // ~30% narrower than the old 960
     const cardX = (CANVAS_W - cardW) / 2; // centered → 204
-    const cardH = 140; // height unchanged
+    const cardH = 133; // ~5% shorter
     const cardY = boxY;
     const pad = 18;
     // Fade-up wraps the whole card; the logo lockup below stays static.
@@ -1321,7 +1321,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     const rowCY = cardY + cardH / 2;
 
     // Avatar (circle, grey placeholder until cleanly loaded)
-    const avSize = 49;
+    const avSize = 47;
     const avX = cardX + pad;
     const avY = rowCY - avSize / 2;
     ctx.save();
@@ -1343,13 +1343,13 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     const nameMaxW = 189;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'alphabetic';
-    ctx.font = '500 18px system-ui, sans-serif';
+    ctx.font = '500 17px system-ui, sans-serif';
     const fullNameW = ctx.measureText(a.name || '').width;
     ctx.fillStyle = '#ffffff';
     ctx.fillText(idxEllipsize(ctx, a.name || '', nameMaxW), nameColX, rowCY - 4);
-    ctx.font = '400 14px system-ui, sans-serif';
+    ctx.font = '400 13px system-ui, sans-serif';
     ctx.fillStyle = '#a1a1aa';
-    ctx.fillText('Index', nameColX, rowCY + 17);
+    ctx.fillText('Index', nameColX, rowCY + 16);
     const nameColW = Math.min(fullNameW, nameMaxW);
 
     // Right column reserved for the numbers; chart flexes into the middle
@@ -1357,7 +1357,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     const rightColW = 110;
     const chartX = nameColX + nameColW + 18;
     const chartW = rightEdge - rightColW - 11 - chartX;
-    const chartH = 60;
+    const chartH = 57;
     const chartY = rowCY - chartH / 2;
 
     let dotPrice = a.index_price ?? 0;
@@ -1408,11 +1408,11 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     // Points value + "points" suffix (right-aligned)
     ctx.textAlign = 'right';
     ctx.textBaseline = 'alphabetic';
-    ctx.font = '400 11px system-ui, sans-serif';
+    ctx.font = '400 10px system-ui, sans-serif';
     ctx.fillStyle = '#a1a1aa';
     ctx.fillText('points', rightEdge, rowCY - 8);
     const ptsLabelW = ctx.measureText('points').width;
-    ctx.font = '400 17px system-ui, sans-serif';
+    ctx.font = '400 16px system-ui, sans-serif';
     ctx.fillText(
       dotPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
       rightEdge - ptsLabelW - 6,
@@ -1423,14 +1423,14 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     const isUp = pct >= 0;
     const pctColor = isUp ? '#04df9d' : '#FF4B4B';
     const pctStr = Math.abs(pct).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '%';
-    ctx.font = '500 17px system-ui, sans-serif';
+    ctx.font = '500 16px system-ui, sans-serif';
     ctx.fillStyle = pctColor;
-    ctx.fillText(pctStr, rightEdge, rowCY + 17);
+    ctx.fillText(pctStr, rightEdge, rowCY + 16);
     const pctW = ctx.measureText(pctStr).width;
-    const triW = 13;
+    const triW = 12;
     const triH = 8;
     const triX = rightEdge - pctW - 6 - triW;
-    const triTop = rowCY + 9;
+    const triTop = rowCY + 8;
     ctx.beginPath();
     if (isUp) {
       ctx.moveTo(triX + triW / 2, triTop);
