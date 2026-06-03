@@ -67,6 +67,30 @@ function idxLerpRGB(
 ) {
   return `rgb(${Math.round(idxLerp(from.r, to.r, t))},${Math.round(idxLerp(from.g, to.g, t))},${Math.round(idxLerp(from.b, to.b, t))})`;
 }
+// Evaluate a CSS cubic-bezier(x1,y1,x2,y2) easing at progress p (P0=0,0 P3=1,1),
+// solving for the parametric value via Newton-Raphson. Used for the card flutter.
+function idxBezier(p: number, x1: number, y1: number, x2: number, y2: number) {
+  if (p <= 0) return 0;
+  if (p >= 1) return 1;
+  const cx = 3 * x1;
+  const bx = 3 * (x2 - x1) - cx;
+  const ax = 1 - cx - bx;
+  const cy = 3 * y1;
+  const by = 3 * (y2 - y1) - cy;
+  const ay = 1 - cy - by;
+  const sampleX = (s: number) => ((ax * s + bx) * s + cx) * s;
+  const sampleDX = (s: number) => (3 * ax * s + 2 * bx) * s + cx;
+  let s = p;
+  for (let i = 0; i < 6; i++) {
+    const x = sampleX(s) - p;
+    if (Math.abs(x) < 1e-4) break;
+    const d = sampleDX(s);
+    if (Math.abs(d) < 1e-6) break;
+    s -= x / d;
+  }
+  s = Math.max(0, Math.min(1, s));
+  return ((ay * s + by) * s + cy) * s;
+}
 function idxRoundRectPath(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
   ctx.beginPath();
   ctx.moveTo(x + r, y);
@@ -1265,8 +1289,13 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     const DRAW_MS = 4500;
     const tMs = timeSeconds * 1000;
     const a = artists[Math.floor(tMs / CYCLE_MS) % artists.length];
-    const tRaw = Math.min((tMs % CYCLE_MS) / DRAW_MS, 1);
+    const cycleElapsed = tMs % CYCLE_MS;
+    const tRaw = Math.min(cycleElapsed / DRAW_MS, 1);
     const progress = 1 - Math.pow(1 - tRaw, 2); // easeOutSoft
+
+    // Per-card fade-up flutter (matches CTA animation 2's sxArtistFadeIn): each
+    // new card fades in and slides up ~16px over 0.6s with the same easing.
+    const fade = idxBezier(Math.min(cycleElapsed / 600, 1), 0.25, 0.46, 0.45, 0.94);
 
     // ── Card shell ──
     const cardX = 60;
@@ -1274,6 +1303,10 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     const cardH = 140;
     const cardY = boxY;
     const pad = 26;
+    // Fade-up wraps the whole card; the logo lockup below stays static.
+    ctx.save();
+    ctx.globalAlpha = fade;
+    ctx.translate(0, (1 - fade) * 16);
     ctx.save();
     idxRoundRectPath(ctx, cardX, cardY, cardW, cardH, 22);
     // Grey card, a touch darker than CTA animation 2's ~rgb(20,20,20): over
@@ -1409,6 +1442,9 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     }
     ctx.closePath();
     ctx.fill();
+
+    // End the card fade-up wrapper; the logo lockup below does not fade.
+    ctx.restore();
 
     // ── Sonotrade lockup below the card ──
     let logo = sonotradeLogoRef.current;
