@@ -1328,7 +1328,9 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, Props>(function TikTokCa
     const cardX = (CANVAS_W - cardW) / 2; // centered → 204
     const cardH = 133; // ~5% shorter
     const cardY = boxY;
-    const pad = 18;
+    // Left/right inset = the avatar's top/bottom gap ((cardH - avSize)/2 = 33),
+    // so the avatar sits with equal padding on top, left and bottom.
+    const pad = 33;
     // Fade-up wraps the whole card; the logo lockup below stays static.
     ctx.save();
     ctx.globalAlpha = fade;
