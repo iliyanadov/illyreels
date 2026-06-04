@@ -12,7 +12,7 @@
  * src/app/landing/animation/page.tsx.
  */
 
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useId, useMemo, useRef, useState } from 'react'
 import NumberFlow from '@number-flow/react'
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -723,6 +723,431 @@ function ChartArtistHeader({
   )
 }
 
+// ───────────────────────────────────────────────────────────────────────────
+//   CompareChart — two artists side by side on one shared price scale
+// ───────────────────────────────────────────────────────────────────────────
+
+type CmpPt = { x: number; y: number; price: number }
+
+// Windowed + downsampled price series for one artist
+function compareSeries(data: DataPoint[] | undefined, windowMs?: number) {
+  if (!data) return [] as { t: number; price: number }[]
+  let pts = data
+    .map((p) => ({ t: new Date(p.timestamp).getTime(), price: parseFloat(String(p.index)) }))
+    .filter((p) => !isNaN(p.t) && !isNaN(p.price))
+    .sort((a, b) => a.t - b.t)
+  if (windowMs && pts.length >= 2) {
+    const cutoff = Date.now() - windowMs
+    const win = pts.filter((p) => p.t >= cutoff)
+    if (win.length >= 2) pts = win
+  }
+  if (pts.length > 200) {
+    const step = (pts.length - 1) / 199
+    pts = Array.from({ length: 200 }, (_, i) => pts[Math.min(Math.round(i * step), pts.length - 1)])
+  }
+  return pts
+}
+
+// Leading dot (position + interpolated price) along a polyline at draw progress
+// Linear-interpolated price at an arbitrary time within a series — gives the
+// replay cursor a leading point that glides smoothly between daily samples.
+function valueAt(s: { t: number; price: number }[], time: number): number | null {
+  if (!s.length) return null
+  if (time <= s[0].t) return s[0].price
+  if (time >= s[s.length - 1].t) return s[s.length - 1].price
+  for (let i = 1; i < s.length; i++) {
+    if (s[i].t >= time) {
+      const a = s[i - 1]
+      const b = s[i]
+      const f = b.t === a.t ? 0 : (time - a.t) / (b.t - a.t)
+      return a.price + (b.price - a.price) * f
+    }
+  }
+  return s[s.length - 1].price
+}
+
+// Representative colour of an artist's profile picture — used as their line
+// colour. We linearise each pixel out of sRGB and average in linear light (then
+// re-encode) for a gamma-correct mean, and we weight each pixel by its chroma
+// (max - min) so bright, colourful pixels dominate and neutral / grey (and
+// dark) ones barely count — otherwise the mean washes out to grey. i.scdn.co serves
+// `access-control-allow-origin: *`, so the canvas readback isn't tainted; on
+// the rare failure the hook returns null and the caller falls back to grey.
+function useAverageColor(url: string | null | undefined): string | null {
+  const [color, setColor] = useState<string | null>(null)
+  useEffect(() => {
+    if (!url) return
+    let cancelled = false
+    const img = new Image()
+    img.crossOrigin = 'anonymous'
+    img.onload = () => {
+      if (cancelled) return
+      try {
+        // sRGB (0..1) <-> linear-light, the standard sRGB transfer functions.
+        const toLinear = (c: number) =>
+          c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)
+        const toSrgb = (l: number) =>
+          l <= 0.0031308 ? l * 12.92 : 1.055 * Math.pow(l, 1 / 2.4) - 0.055
+
+        // Draw at (capped) native resolution so the browser's downscaler does
+        // not pre-average in gamma space and reintroduce the very error we're
+        // trying to avoid.
+        const maxDim = 1024
+        const scale = Math.min(
+          1,
+          maxDim / Math.max(img.naturalWidth, img.naturalHeight, 1),
+        )
+        const w = Math.max(1, Math.round(img.naturalWidth * scale))
+        const h = Math.max(1, Math.round(img.naturalHeight * scale))
+        const canvas = document.createElement('canvas')
+        canvas.width = w
+        canvas.height = h
+        const ctx = canvas.getContext('2d')
+        if (!ctx) return
+        ctx.drawImage(img, 0, 0, w, h)
+        const { data } = ctx.getImageData(0, 0, w, h)
+
+        // Weight each pixel by its chroma (max - min) so bright, colourful
+        // pixels dominate. Unlike HSV saturation, chroma is brightness-aware, so
+        // dark colours count proportionally less (and grey still counts as 0).
+        // Still averaged in linear light, then re-encoded.
+        const CHROMA_POW = 2 // higher = more strongly favour vivid pixels
+        let rl = 0
+        let gl = 0
+        let bl = 0
+        let wSum = 0 // sum of chroma weights
+        let rlFlat = 0
+        let glFlat = 0
+        let blFlat = 0
+        let n = 0 // plain pixel count (greyscale fallback)
+        for (let i = 0; i < data.length; i += 4) {
+          if (data[i + 3] < 16) continue // skip near-transparent pixels
+          const sr = data[i] / 255
+          const sg = data[i + 1] / 255
+          const sb = data[i + 2] / 255
+          const maxc = Math.max(sr, sg, sb)
+          const minc = Math.min(sr, sg, sb)
+          const chroma = maxc - minc // 0 for grey, low for dark colours, high for bright vivid
+          const lr = toLinear(sr)
+          const lg = toLinear(sg)
+          const lb = toLinear(sb)
+          const w = Math.pow(chroma, CHROMA_POW)
+          rl += w * lr
+          gl += w * lg
+          bl += w * lb
+          wSum += w
+          rlFlat += lr
+          glFlat += lg
+          blFlat += lb
+          n += 1
+        }
+        // Use the saturation-weighted mean; fall back to the plain mean only if
+        // the cover is essentially greyscale (no colour worth weighting).
+        const useWeighted = wSum > 1e-3
+        const denom = useWeighted ? wSum : n
+        const er = useWeighted ? rl : rlFlat
+        const eg = useWeighted ? gl : glFlat
+        const eb = useWeighted ? bl : blFlat
+        if (denom > 0) {
+          const r = Math.round(toSrgb(er / denom) * 255)
+          const g = Math.round(toSrgb(eg / denom) * 255)
+          const b = Math.round(toSrgb(eb / denom) * 255)
+          setColor(`rgb(${r},${g},${b})`)
+        }
+      } catch {
+        // Tainted canvas / read failure — keep the fallback colour
+      }
+    }
+    img.src = url
+    return () => {
+      cancelled = true
+    }
+  }, [url])
+  return color
+}
+
+function CompareChart({
+  artistA,
+  artistB,
+  height: H = 420,
+  windowMs,
+}: {
+  artistA: ArtistData | null
+  artistB: ArtistData | null
+  height?: number
+  windowMs?: number
+}) {
+  const svgRef = useRef<SVGSVGElement>(null)
+  const uid = useId() // unique clip-path ids for the leading-edge avatars
+  const [W, setW] = useState(700)
+  const [cursorT, setCursorT] = useState(0) // 0..1 position within the replay
+  const rafRef = useRef<number | null>(null)
+  const startRef = useRef(0)
+  const LEAD_R = 16 // leading-edge avatar radius
+
+  useEffect(() => {
+    const update = () => {
+      if (svgRef.current) {
+        const w = svgRef.current.getBoundingClientRect().width
+        if (w > 0) setW(w)
+      }
+    }
+    update()
+    const ro = new ResizeObserver(update)
+    if (svgRef.current) ro.observe(svgRef.current)
+    return () => ro.disconnect()
+  }, [])
+
+  // 18-month data pool per artist; the replay reveals progressively within it.
+  const sA = useMemo(() => compareSeries(artistA?.data_points, windowMs), [artistA, windowMs])
+  const sB = useMemo(() => compareSeries(artistB?.data_points, windowMs), [artistB, windowMs])
+
+  // Replay time domain: earliest point across both -> latest across both.
+  const tStart = useMemo(() => {
+    const f: number[] = []
+    if (sA.length) f.push(sA[0].t)
+    if (sB.length) f.push(sB[0].t)
+    return f.length ? Math.min(...f) : 0
+  }, [sA, sB])
+  const tEnd = useMemo(() => {
+    const l: number[] = []
+    if (sA.length) l.push(sA[sA.length - 1].t)
+    if (sB.length) l.push(sB[sB.length - 1].t)
+    return l.length ? Math.max(...l) : 1
+  }, [sA, sB])
+
+  // Looping cursor: grow the window over GROW ms, hold at full, reset, repeat.
+  const dataKey = `${artistA?.name ?? ''}|${artistB?.name ?? ''}|${sA.length}|${sB.length}`
+  useEffect(() => {
+    if (sA.length < 2 && sB.length < 2) return
+    if (rafRef.current) cancelAnimationFrame(rafRef.current)
+    startRef.current = performance.now()
+    const GROW = 7000 // ~18 months of growth
+    const HOLD = 1200 // pause on the full view before looping back
+    const CYCLE = GROW + HOLD
+    const animate = (now: number) => {
+      const phase = (now - startRef.current) % CYCLE
+      setCursorT(Math.min(phase / GROW, 1))
+      rafRef.current = requestAnimationFrame(animate)
+    }
+    rafRef.current = requestAnimationFrame(animate)
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dataKey])
+
+  const PAD_T = AXIS_PAD_T
+  const PAD_B = AXIS_PAD_B
+  const chartAreaH = H - PAD_T - PAD_B
+  const CHART_W = Math.max(0, W - AXIS_YW)
+
+  // Window left edge pinned at tStart (18 months ago); the cursor (right edge)
+  // advances toward tEnd. Starts ~1 month wide so there is always a line and a
+  // leading point sitting on the right edge.
+  const fullSpan = Math.max(tEnd - tStart, 1)
+  const minWin = Math.min(30 * 24 * 60 * 60 * 1000, fullSpan)
+  const cursorTime = tStart + minWin + cursorT * (fullSpan - minWin)
+  const winRange = Math.max(cursorTime - tStart, 1)
+
+  // Reveal each series up to the cursor, plus an interpolated point AT the
+  // cursor so the leading edge glides smoothly between samples.
+  const reveal = (s: { t: number; price: number }[]) => {
+    const out = s.filter((p) => p.t <= cursorTime)
+    const lead = valueAt(s, cursorTime)
+    if (lead != null && (!out.length || out[out.length - 1].t < cursorTime)) {
+      out.push({ t: cursorTime, price: lead })
+    }
+    return out
+  }
+  const revA = reveal(sA)
+  const revB = reveal(sB)
+
+  // Price (y) scale from the REVEALED data of both artists, so the horizontal
+  // gridlines rescale up/down as the window grows.
+  const rPrices = [...revA, ...revB].map((p) => p.price)
+  const minP = rPrices.length ? Math.min(...rPrices) : 0
+  const maxP = rPrices.length ? Math.max(...rPrices) : 1
+  const pRange = maxP === minP ? 1 : maxP - minP
+  const PAD = pRange * 0.08
+  const loP = minP - PAD
+  const vRange = pRange + 2 * PAD
+
+  // Project the revealed window [tStart, cursorTime] across the full width, so
+  // the leading point sits on the right edge and the axis rescales as it grows.
+  const project = (s: { t: number; price: number }[]): CmpPt[] =>
+    s.map((p) => ({
+      x: ((p.t - tStart) / winRange) * CHART_W,
+      y: PAD_T + (1 - (p.price - loP) / vRange) * chartAreaH,
+      price: p.price,
+    }))
+  const ptsA = project(revA)
+  const ptsB = project(revB)
+
+  const pathStr = (pts: CmpPt[]) =>
+    pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')
+  const pathA = pathStr(ptsA)
+  const pathB = pathStr(ptsB)
+
+  // Fixed line colour = the average colour of each artist's profile picture
+  // (no trend-based green/red, and it no longer animates).
+  const colorA = useAverageColor(artistA?.image_url) ?? '#9ca3af'
+  const colorB = useAverageColor(artistB?.image_url) ?? '#9ca3af'
+
+  // Leading point (right edge) drives the dot + the header readout.
+  const leadA = ptsA[ptsA.length - 1] ?? null
+  const leadB = ptsB[ptsB.length - 1] ?? null
+  const chgFor = (rev: { t: number; price: number }[]) => {
+    if (rev.length < 2) return null
+    const first = rev[0].price
+    const last = rev[rev.length - 1].price
+    return {
+      rawChange: last - first,
+      percentChange: first > 0 ? ((last - first) / first) * 100 : 0,
+    }
+  }
+
+  // Leading-edge marker = the artist's profile picture (clipped to a circle)
+  // ringed with a thin stroke in the line colour. Falls back to a dot if the
+  // image is missing.
+  const renderLead = (
+    lead: CmpPt | null,
+    ptsLen: number,
+    color: string,
+    image: string | null | undefined,
+    key: string,
+  ) => {
+    if (!lead || ptsLen < 2) return null
+    if (!image) return <circle key={key} cx={lead.x} cy={lead.y} r="3.5" fill={color} />
+    const clipId = `${uid}-${key}`
+    return (
+      <g key={key}>
+        <clipPath id={clipId}>
+          <circle cx={lead.x} cy={lead.y} r={LEAD_R} />
+        </clipPath>
+        <image
+          href={image}
+          x={lead.x - LEAD_R}
+          y={lead.y - LEAD_R}
+          width={LEAD_R * 2}
+          height={LEAD_R * 2}
+          clipPath={`url(#${clipId})`}
+          preserveAspectRatio="xMidYMid slice"
+        />
+        <circle cx={lead.x} cy={lead.y} r={LEAD_R} fill="none" stroke={color} strokeWidth={2.5} />
+      </g>
+    )
+  }
+
+  return (
+    <div style={{ width: '100%', maxWidth: 760 }}>
+      {/* One header per artist */}
+      <div style={{ display: 'flex', gap: 24 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <ChartArtistHeader
+            artist={artistA}
+            drawingPrice={leadA ? leadA.price : null}
+            fallbackPrice={artistA?.index_price ?? 0}
+            changeData={chgFor(revA)}
+            chartColor={colorA}
+          />
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <ChartArtistHeader
+            artist={artistB}
+            drawingPrice={leadB ? leadB.price : null}
+            fallbackPrice={artistB?.index_price ?? 0}
+            changeData={chgFor(revB)}
+            chartColor={colorB}
+          />
+        </div>
+      </div>
+
+      {/* Shared chart: both lines overlaid on one growing, rescaling axis */}
+      <div style={{ width: '100%', height: H, position: 'relative' }}>
+        {[0, 0.25, 0.5, 0.75, 1].map((frac) => {
+          const gy = PAD_T + frac * chartAreaH
+          const price = rPrices.length ? loP + vRange * (1 - frac) : null
+          return (
+            <div key={frac} style={{ position: 'absolute', top: gy, left: 0, right: 0, pointerEvents: 'none' }}>
+              <div
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  right: AXIS_YW,
+                  height: 1,
+                  backgroundImage: `repeating-linear-gradient(to right, ${AXIS_GRID} 0px, ${AXIS_GRID} 1px, transparent 1px, transparent 5px)`,
+                }}
+              />
+              {price != null && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    right: 2,
+                    transform: 'translateY(-50%)',
+                    fontSize: 10,
+                    fontFamily: 'var(--font-geist-sans)',
+                    color: AXIS_MUTED,
+                    whiteSpace: 'nowrap',
+                    lineHeight: 1,
+                  }}
+                >
+                  {price.toFixed(2)}
+                </div>
+              )}
+            </div>
+          )
+        })}
+        <svg ref={svgRef} width="100%" height={H} style={{ display: 'block', overflow: 'visible' }}>
+          {pathA && ptsA.length >= 2 && (
+            <path
+              d={pathA}
+              fill="none"
+              stroke={colorA}
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          )}
+          {pathB && ptsB.length >= 2 && (
+            <path
+              d={pathB}
+              fill="none"
+              stroke={colorB}
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          )}
+          {renderLead(leadA, ptsA.length, colorA, artistA?.image_url, 'a')}
+          {renderLead(leadB, ptsB.length, colorB, artistB?.image_url, 'b')}
+        </svg>
+
+        {/* X-axis date ticks across the current (growing) window */}
+        {winRange > 1 &&
+          Array.from({ length: 5 }, (_, i) => {
+            const ts = tStart + (i * winRange) / 4
+            const leftPct = ((ts - tStart) / winRange) * (CHART_W / Math.max(W, 1)) * 100
+            const transform =
+              i === 0 ? 'translateX(0)' : i === 4 ? 'translateX(-100%)' : 'translateX(-50%)'
+            return (
+              <div
+                key={i}
+                style={{ position: 'absolute', bottom: 6, left: `${leftPct}%`, transform, pointerEvents: 'none' }}
+              >
+                <span style={{ fontSize: 10, color: AXIS_MUTED, fontFamily: 'var(--font-geist-sans)' }}>
+                  {formatAxisDate(ts)}
+                </span>
+              </div>
+            )
+          })}
+      </div>
+    </div>
+  )
+}
+
 export default function LandingAnimations() {
   const { artists: heroArtists, loaded: heroLoaded } = useHeroArtists()
   const mockData = useMemo(makeMockData, [])
@@ -751,6 +1176,10 @@ export default function LandingAnimations() {
   }, [heroLoaded, heroArtists.length])
 
   const artist = heroArtists[displayIndex] ?? null
+  // Compare tile uses a stable pair (first two of the shuffled roster) so its
+  // replay loops the SAME two artists continuously, independent of the hero cycle.
+  const compareA = heroArtists[0] ?? null
+  const compareB = heroArtists.length > 1 ? heroArtists[1] : null
   const chartData = artist?.data_points ?? mockData
   const fallbackPrice =
     artist?.index_price ?? mockData[mockData.length - 1]?.index ?? 0
@@ -826,6 +1255,17 @@ export default function LandingAnimations() {
                 onPrice={setDrawingPrice}
                 onChangeData={setChangeData}
                 onColor={setChartColor}
+              />
+            </div>
+          </Tile>
+
+          <Tile title="Compare (two artists)">
+            <div style={{ width: '100%', display: 'flex', justifyContent: 'center' }}>
+              <CompareChart
+                artistA={compareA}
+                artistB={compareB}
+                height={420}
+                windowMs={548 * 24 * 60 * 60 * 1000 /* ~18 months */}
               />
             </div>
           </Tile>
