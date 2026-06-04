@@ -128,6 +128,7 @@ function AboutChart({
   strokeWidth = 2,
   padY = 20,
   axes = false,
+  windowMs,
   easing = 'easeOut',
   onPrice,
   onChangeData,
@@ -140,6 +141,7 @@ function AboutChart({
   strokeWidth?: number
   padY?: number
   axes?: boolean
+  windowMs?: number
   easing?: 'easeOut' | 'easeOutSoft' | 'easeInOut' | 'linear'
   onPrice?: (p: number) => void
   onChangeData?: (d: { percentChange: number; rawChange: number }) => void
@@ -178,7 +180,7 @@ function AboutChart({
   }, [])
 
   const chartData = useMemo(() => {
-    const pts = data
+    let pts = data
       .map((p) => ({
         timestamp: new Date(p.timestamp).getTime(),
         price: parseFloat(String(p.index)),
@@ -186,6 +188,13 @@ function AboutChart({
       .filter((p) => !isNaN(p.timestamp) && !isNaN(p.price))
       .sort((a, b) => a.timestamp - b.timestamp)
     if (!pts.length) return []
+    // Restrict to a recent window so a fast move isn't squeezed into a
+    // near-vertical line by years of history (matches the real chart's period).
+    if (windowMs) {
+      const cutoff = Date.now() - windowMs
+      const win = pts.filter((p) => p.timestamp >= cutoff)
+      if (win.length >= 2) pts = win
+    }
     const last = pts[pts.length - 1]
     if (last.timestamp < Date.now() - 30_000)
       pts.push({ timestamp: Date.now(), price: last.price })
@@ -197,7 +206,7 @@ function AboutChart({
       )
     }
     return pts
-  }, [data])
+  }, [data, windowMs])
 
   const firstPrice = chartData[0]?.price ?? 0
   const lastPrice = chartData[chartData.length - 1]?.price ?? 0
@@ -206,6 +215,12 @@ function AboutChart({
   const minP = chartData.length ? Math.min(...chartData.map((d) => d.price)) : 0
   const maxP = chartData.length ? Math.max(...chartData.map((d) => d.price)) : 1
   const pRange = maxP === minP ? 1 : maxP - minP
+  // Vertical headroom (axes only): the line maps to [loP, hiP] and the
+  // gridlines bracket that same range, so the peak/trough stay inside the
+  // gridded area instead of running off the top/bottom.
+  const PRICE_PAD = axes ? pRange * 0.08 : 0
+  const loP = minP - PRICE_PAD
+  const vRange = pRange + 2 * PRICE_PAD
   const tStart = chartData[0]?.timestamp ?? 0
   const tEnd = chartData[chartData.length - 1]?.timestamp ?? tStart + 1
   const tRange = tEnd - tStart || 1
@@ -220,10 +235,10 @@ function AboutChart({
     () =>
       chartData.map((d) => ({
         x: ((d.timestamp - tStart) / tRange) * CHART_W,
-        y: PAD_T + (1 - (d.price - minP) / pRange) * (H - PAD_T - PAD_B),
+        y: PAD_T + (1 - (d.price - loP) / vRange) * (H - PAD_T - PAD_B),
         price: d.price,
       })),
-    [chartData, CHART_W, tStart, tRange, minP, pRange, H, PAD_T, PAD_B],
+    [chartData, CHART_W, tStart, tRange, loP, vRange, H, PAD_T, PAD_B],
   )
 
   const linePath = points
@@ -360,12 +375,10 @@ function AboutChart({
     <div style={{ width: '100%', height: H, position: 'relative' }}>
       {/* Y-axis: horizontal dashed gridlines + right-side price labels */}
       {axes &&
-        [0, 0.25, 0.5, 0.75].map((frac) => {
-          const gy = frac * H
+        [0, 0.25, 0.5, 0.75, 1].map((frac) => {
           const chartAreaH = H - PAD_T - PAD_B
-          const gridPrice = chartData.length
-            ? minP + (1 - (gy - PAD_T) / chartAreaH) * pRange
-            : null
+          const gy = PAD_T + frac * chartAreaH
+          const gridPrice = chartData.length ? loP + vRange * (1 - frac) : null
           return (
             <div
               key={frac}
@@ -761,22 +774,26 @@ export default function LandingAnimations() {
             <div
               style={{
                 width: '100%',
-                maxWidth: 560,
+                maxWidth: 540,
                 opacity,
                 transition: 'opacity 0.6s ease',
               }}
             >
-              <ChartArtistHeader
-                artist={artist}
-                drawingPrice={drawingPrice}
-                fallbackPrice={fallbackPrice}
-                changeData={changeData}
-                chartColor={chartColor}
-              />
+              {/* Header kept at its original width; only the chart widens */}
+              <div style={{ maxWidth: 260 }}>
+                <ChartArtistHeader
+                  artist={artist}
+                  drawingPrice={drawingPrice}
+                  fallbackPrice={fallbackPrice}
+                  changeData={changeData}
+                  chartColor={chartColor}
+                />
+              </div>
               <AboutChart
                 data={chartData}
-                height={260}
+                height={560}
                 axes
+                windowMs={365 * 24 * 60 * 60 * 1000}
                 onPrice={setDrawingPrice}
                 onChangeData={setChangeData}
                 onColor={setChartColor}
