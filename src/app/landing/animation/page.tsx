@@ -149,6 +149,17 @@ function formatAxisDate(ms: number): string {
   return `${d.getMonth() + 1}/${d.getDate()}`
 }
 
+// "Nice" round step (…, 0.5, 1, 2, 5, 10, 20, 50, …) that splits `range` into
+// roughly `target` intervals — used for round-number price gridlines.
+function niceStep(range: number, target: number): number {
+  if (!(range > 0) || !(target > 0)) return 1
+  const raw = range / target
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)))
+  const norm = raw / mag
+  const step = norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10
+  return step * mag
+}
+
 function AboutChart({
   data = [],
   height: H = 260,
@@ -976,6 +987,35 @@ function CompareChart({
   const loP = minP - PAD
   const vRange = pRange + 2 * PAD
 
+  // Round-number y gridlines. The step is sized to the FULL data range (fixed
+  // for the whole replay), so as the revealed range grows, more lines spawn in.
+  const fullPrices = [...sA, ...sB].map((p) => p.price)
+  const fullMin = fullPrices.length ? Math.min(...fullPrices) : 0
+  const fullMax = fullPrices.length ? Math.max(...fullPrices) : 1
+  const gridStep = niceStep((fullMax - fullMin) || 1, 6)
+  const gridLines: number[] = []
+  if (rPrices.length && gridStep > 0 && vRange > 0) {
+    const hiP = loP + vRange
+    const firstLine = Math.ceil(loP / gridStep) * gridStep
+    for (let p = firstLine, guard = 0; p <= hiP + 1e-6 && guard < 100; p += gridStep, guard++) {
+      gridLines.push(p)
+    }
+  }
+
+  // X axis: one label per visible calendar year, centred under that year's span.
+  const yearTicks: { year: number; left: number }[] = []
+  if (winRange > 1 && CHART_W > 0) {
+    const y0 = new Date(tStart).getFullYear()
+    const y1 = new Date(cursorTime).getFullYear()
+    for (let y = y0; y <= y1; y++) {
+      const spanStart = Math.max(new Date(y, 0, 1).getTime(), tStart)
+      const spanEnd = Math.min(new Date(y + 1, 0, 1).getTime(), cursorTime)
+      const center = (spanStart + spanEnd) / 2
+      const left = ((center - tStart) / winRange) * (CHART_W / Math.max(W, 1)) * 100
+      yearTicks.push({ year: y, left })
+    }
+  }
+
   // Project the revealed window [tStart, cursorTime] across the full width, so
   // the leading point sits on the right edge and the axis rescales as it grows.
   const project = (s: { t: number; price: number }[]): CmpPt[] =>
@@ -1072,11 +1112,10 @@ function CompareChart({
 
       {/* Shared chart: both lines overlaid on one growing, rescaling axis */}
       <div style={{ width: '100%', height: H, position: 'relative' }}>
-        {[0, 0.25, 0.5, 0.75, 1].map((frac) => {
-          const gy = PAD_T + frac * chartAreaH
-          const price = rPrices.length ? loP + vRange * (1 - frac) : null
+        {gridLines.map((price) => {
+          const gy = PAD_T + (1 - (price - loP) / vRange) * chartAreaH
           return (
-            <div key={frac} style={{ position: 'absolute', top: gy, left: 0, right: 0, pointerEvents: 'none' }}>
+            <div key={price} style={{ position: 'absolute', top: gy, left: 0, right: 0, pointerEvents: 'none' }}>
               <div
                 style={{
                   position: 'absolute',
@@ -1087,26 +1126,36 @@ function CompareChart({
                   backgroundImage: `repeating-linear-gradient(to right, ${AXIS_GRID} 0px, ${AXIS_GRID} 1px, transparent 1px, transparent 5px)`,
                 }}
               />
-              {price != null && (
-                <div
-                  style={{
-                    position: 'absolute',
-                    top: 0,
-                    right: 2,
-                    transform: 'translateY(-50%)',
-                    fontSize: 10,
-                    fontFamily: 'var(--font-geist-sans)',
-                    color: AXIS_MUTED,
-                    whiteSpace: 'nowrap',
-                    lineHeight: 1,
-                  }}
-                >
-                  {price.toFixed(2)}
-                </div>
-              )}
+              <div
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  right: 2,
+                  transform: 'translateY(-50%)',
+                  fontSize: 10,
+                  fontFamily: 'var(--font-geist-sans)',
+                  color: AXIS_MUTED,
+                  whiteSpace: 'nowrap',
+                  lineHeight: 1,
+                }}
+              >
+                {price.toFixed(2)}
+              </div>
             </div>
           )
         })}
+        {/* Fixed bottom axis — always present; only the gridlines above vary */}
+        <div
+          style={{
+            position: 'absolute',
+            top: PAD_T + chartAreaH,
+            left: 0,
+            right: AXIS_YW,
+            height: 1,
+            backgroundColor: AXIS_GRID,
+            pointerEvents: 'none',
+          }}
+        />
         <svg ref={svgRef} width="100%" height={H} style={{ display: 'block', overflow: 'visible' }}>
           {pathA && ptsA.length >= 2 && (
             <path
@@ -1132,24 +1181,21 @@ function CompareChart({
           {renderLead(leadB, ptsB.length, colorB, artistB?.image_url, 'b')}
         </svg>
 
-        {/* X-axis date ticks across the current (growing) window */}
-        {winRange > 1 &&
-          Array.from({ length: 5 }, (_, i) => {
-            const ts = tStart + (i * winRange) / 4
-            const leftPct = ((ts - tStart) / winRange) * (CHART_W / Math.max(W, 1)) * 100
-            const transform =
-              i === 0 ? 'translateX(0)' : i === 4 ? 'translateX(-100%)' : 'translateX(-50%)'
-            return (
-              <div
-                key={i}
-                style={{ position: 'absolute', bottom: 6, left: `${leftPct}%`, transform, pointerEvents: 'none' }}
-              >
-                <span style={{ fontSize: 10, color: AXIS_MUTED, fontFamily: 'var(--font-geist-sans)' }}>
-                  {formatAxisDate(ts)}
-                </span>
-              </div>
-            )
-          })}
+        {/* X-axis: one label per visible calendar year, centred on its span */}
+        {yearTicks.map(({ year, left }) => {
+          const transform =
+            left <= 8 ? 'translateX(0)' : left >= 92 ? 'translateX(-100%)' : 'translateX(-50%)'
+          return (
+            <div
+              key={year}
+              style={{ position: 'absolute', bottom: 6, left: `${left}%`, transform, pointerEvents: 'none' }}
+            >
+              <span style={{ fontSize: 10, color: AXIS_MUTED, fontFamily: 'var(--font-geist-sans)' }}>
+                {year}
+              </span>
+            </div>
+          )
+        })}
       </div>
     </div>
   )
