@@ -595,11 +595,13 @@ function ChartArtistHeader({
       style={{
         display: 'flex',
         flexDirection: 'column',
+        alignItems: 'center',
         gap: 16,
         marginBottom: 24,
+        textAlign: 'center',
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
         {imageUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
@@ -642,6 +644,7 @@ function ChartArtistHeader({
         style={{
           display: 'flex',
           alignItems: 'center',
+          justifyContent: 'center',
           gap: 12,
           flexWrap: 'wrap',
         }}
@@ -670,7 +673,7 @@ function ChartArtistHeader({
             fontFamily: FONT,
           }}
         >
-          points
+          pts
         </span>
         {changeData && (
           <div
@@ -1019,22 +1022,26 @@ function CompareChart({
   ) => {
     if (!lead || ptsLen < 2) return null
     if (!image) return <circle key={key} cx={lead.x} cy={lead.y} r="3.5" fill={color} />
+    // Pin the circle's centre-left (9 o'clock) to the line's endpoint: shift the
+    // whole marker right by its radius so the line attaches at the left edge.
+    const cx = lead.x + LEAD_R
+    const cy = lead.y
     const clipId = `${uid}-${key}`
     return (
       <g key={key}>
         <clipPath id={clipId}>
-          <circle cx={lead.x} cy={lead.y} r={LEAD_R} />
+          <circle cx={cx} cy={cy} r={LEAD_R} />
         </clipPath>
         <image
           href={image}
-          x={lead.x - LEAD_R}
-          y={lead.y - LEAD_R}
+          x={cx - LEAD_R}
+          y={cy - LEAD_R}
           width={LEAD_R * 2}
           height={LEAD_R * 2}
           clipPath={`url(#${clipId})`}
           preserveAspectRatio="xMidYMid slice"
         />
-        <circle cx={lead.x} cy={lead.y} r={LEAD_R} fill="none" stroke={color} strokeWidth={2.5} />
+        <circle cx={cx} cy={cy} r={LEAD_R} fill="none" stroke={color} strokeWidth={2.5} />
       </g>
     )
   }
@@ -1264,7 +1271,7 @@ export default function LandingAnimations() {
               <CompareChart
                 artistA={compareA}
                 artistB={compareB}
-                height={420}
+                height={500}
                 windowMs={548 * 24 * 60 * 60 * 1000 /* ~18 months */}
               />
             </div>
