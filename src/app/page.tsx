@@ -19,6 +19,21 @@ function getMetaStatusFromUrl() {
   return { connected: meta === 'connected', error: metaError };
 }
 
+// Coerce an error value to a string for rendering. API responses sometimes put
+// a structured object (e.g. { code, id, message }) on `error`/`message`; passing
+// that straight into JSX throws React error #31, so always render a string.
+function toMsg(v: unknown, fallback = ''): string {
+  if (v == null) return fallback;
+  if (typeof v === 'string') return v || fallback;
+  if (typeof v === 'object') {
+    const o = v as Record<string, unknown>;
+    if (typeof o.message === 'string') return o.message;
+    if (typeof o.error === 'string') return o.error;
+    try { return JSON.stringify(v); } catch { return fallback; }
+  }
+  return String(v);
+}
+
 interface InstagramUser {
   id: string;
   username: string;
@@ -1472,8 +1487,8 @@ export default function Home() {
               {loadingIgUser ? 'Loading...' : 'Connect Instagram'}
             </button>
             {metaError && (
-              <span className="text-xs text-red-400 max-w-[220px] truncate" title={metaError}>
-                {metaError}
+              <span className="text-xs text-red-400 max-w-[220px] truncate" title={toMsg(metaError)}>
+                {toMsg(metaError)}
               </span>
             )}
             </div>
@@ -1639,9 +1654,9 @@ export default function Home() {
                         className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white placeholder-zinc-500 outline-none focus:border-blue-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                       />
                       {entry.marketError && (
-                        <p className="mt-1 text-xs text-red-400">{entry.marketError}</p>
+                        <p className="mt-1 text-xs text-red-400">{toMsg(entry.marketError)}</p>
                       )}
-                      {entry.marketData && (
+                      {entry.marketData && typeof entry.marketData.title === 'string' && (
                         <p className="mt-1 text-xs text-green-400">✓ {entry.marketData.title}</p>
                       )}
                     </td>
@@ -1707,7 +1722,7 @@ export default function Home() {
           <div className="mt-4 space-y-2">
             {entries.map(entry => entry.error && (
               <div key={entry.id} className="rounded-xl border border-red-800 bg-red-950/50 px-4 py-3 text-sm text-red-400">
-                <strong>Row {entries.indexOf(entry) + 1}:</strong> {entry.error}
+                <strong>Row {entries.indexOf(entry) + 1}:</strong> {toMsg(entry.error)}
               </div>
             ))}
           </div>
@@ -1915,8 +1930,8 @@ export default function Home() {
                           </svg>
                           <div className="flex-1">
                             <p className="text-xs font-semibold text-red-400">Upload Failed</p>
-                            <p className="text-xs text-red-300 mt-1">{entry.uploadError}</p>
-                            {entry.uploadError.toLowerCase().includes('auth') && (
+                            <p className="text-xs text-red-300 mt-1">{toMsg(entry.uploadError)}</p>
+                            {toMsg(entry.uploadError).toLowerCase().includes('auth') && (
                               <p className="text-xs text-zinc-400 mt-1">Please reconnect your Instagram account and try again.</p>
                             )}
                           </div>
@@ -2102,7 +2117,7 @@ export default function Home() {
 
               {sheetsError && (
                 <div className="rounded-lg border border-red-800 bg-red-950/50 px-3 py-2 text-xs text-red-400">
-                  {sheetsError}
+                  {toMsg(sheetsError)}
                 </div>
               )}
 
@@ -2216,7 +2231,7 @@ export default function Home() {
 
               {generateError && (
                 <div className="rounded-lg border border-red-800 bg-red-950/50 px-3 py-2 text-xs text-red-400">
-                  {generateError}
+                  {toMsg(generateError)}
                 </div>
               )}
 
