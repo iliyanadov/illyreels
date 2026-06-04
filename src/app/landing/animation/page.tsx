@@ -1156,6 +1156,18 @@ function CompareChart({
             pointerEvents: 'none',
           }}
         />
+        {/* Fixed left axis (y-axis baseline) — always present */}
+        <div
+          style={{
+            position: 'absolute',
+            top: PAD_T,
+            left: 0,
+            width: 1,
+            height: chartAreaH,
+            backgroundColor: AXIS_GRID,
+            pointerEvents: 'none',
+          }}
+        />
         <svg ref={svgRef} width="100%" height={H} style={{ display: 'block', overflow: 'visible' }}>
           {pathA && ptsA.length >= 2 && (
             <path
@@ -1281,6 +1293,8 @@ export default function LandingAnimations() {
             gap: 24,
           }}
         >
+          {/* AboutChart hidden for now */}
+          {false && (
           <Tile title="AboutChart">
             <div
               style={{
@@ -1311,13 +1325,14 @@ export default function LandingAnimations() {
               />
             </div>
           </Tile>
+          )}
 
           <Tile title="Compare (two artists)">
             <div style={{ width: '100%', display: 'flex', justifyContent: 'center' }}>
               <CompareChart
                 artistA={compareA}
                 artistB={compareB}
-                height={500}
+                height={620}
                 windowMs={548 * 24 * 60 * 60 * 1000 /* ~18 months */}
               />
             </div>
