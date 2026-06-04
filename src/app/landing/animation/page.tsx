@@ -52,12 +52,24 @@ function lerpRGB(
 //   Hero artist fetching (same Spotify IDs as the landing)
 // ───────────────────────────────────────────────────────────────────────────
 
+// Same roster as the reel canvas carousel (TikTokCanvas INDEX_HERO_IDS)
 const HERO_IDS = [
   '3TVXtAsR1Inumwj472S9r4', // Drake
-  '53XhwfbYqKCa1cC15pYq2q', // Imagine Dragons
-  '06HL4z0CvFAxyc27GXpf02', // Taylor Swift
+  '5K4W6rqBFWDnAN6FQUkS6x', // Kanye West
   '2YZyLoL8N0Wb9xBt1NhZWg', // Kendrick Lamar
-  '6qqNVTkY8uBg9cP3Jd7DAH', // Billie Eilish
+  '7tYKF4w9nC0nq9CsPZTHyP', // SZA
+  '3DbwFQlvLxRSi2uX8mf81A', // Sexyy Red
+  '3fMbdgg4jU18AjLCKBhRSm', // Michael Jackson
+  '5pKCCKE2ajJHZ9KAiaK11H', // Rihanna
+  '0du5cEVh5yTK9QJze8zA0C', // Bruno Mars
+  '74KM79TiuVKeVCqs8QtB0B', // Sabrina Carpenter
+  '1uNFoZAHBGtllmzznpCI3s', // Justin Bieber
+  '1Xyo4u8uXC1ZmMpatF05PJ', // The Weeknd
+  '699OTQXzgjhIYAHMy9RyPD', // Playboi Carti
+  '4q3ewBCX7sLwd24euuV69X', // Bad Bunny
+  '7dGJo4pcD2V6oG8kP0tJRR', // Eminem
+  '0Y5tJX1MQlPlqiwlOH1tJY', // Travis Scott
+  '1McMsnEElThX1knmY4oliG', // Olivia Rodrigo
 ]
 const HERO_INTERVAL_MS = 12000
 
@@ -81,20 +93,37 @@ function useHeroArtists() {
     let cancelled = false
     Promise.all(
       HERO_IDS.map(async (id) => {
-        try {
-          const res = await fetch(
-            `/api/artist/${encodeURIComponent(id)}?slim=true`,
-          )
-          if (!res.ok) return null
-          const data = await res.json()
-          return data.artist as ArtistData
-        } catch {
-          return null
+        // Retry once on a transient miss — 16 parallel fetches can briefly
+        // rate-limit the backend on a cold cache.
+        for (let attempt = 0; attempt < 2; attempt++) {
+          if (attempt > 0) await new Promise((r) => setTimeout(r, 400))
+          if (cancelled) return null
+          try {
+            const res = await fetch(
+              `/api/artist/${encodeURIComponent(id)}?slim=true`,
+            )
+            if (res.ok) {
+              const data = await res.json()
+              if (data?.artist) return data.artist as ArtistData
+            }
+          } catch {
+            // fall through to retry
+          }
         }
+        return null
       }),
     ).then((rs) => {
       if (cancelled) return
-      setArtists(rs.filter(Boolean) as ArtistData[])
+      const list = rs.filter(Boolean) as ArtistData[]
+      // Non-deterministic shuffle so the chart cycles through artists in a
+      // random order (fresh each load), matching the reel canvas carousel.
+      for (let i = list.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1))
+        const tmp = list[i]
+        list[i] = list[j]
+        list[j] = tmp
+      }
+      setArtists(list)
       setLoaded(true)
     })
     return () => {
