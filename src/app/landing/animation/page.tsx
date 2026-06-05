@@ -144,6 +144,7 @@ const AXIS_PAD_T = 40
 const AXIS_PAD_B = 56
 const AXIS_MUTED = '#71717a'
 const AXIS_GRID = '#48484f'
+const AXIS_GRID_SOFT = 'rgba(255,255,255,0.08)' // solid (non-dashed) interior gridlines
 function formatAxisDate(ms: number): string {
   const d = new Date(ms)
   return `${d.getMonth() + 1}/${d.getDate()}`
@@ -431,7 +432,7 @@ function AboutChart({
                   left: 0,
                   right: AXIS_YW,
                   height: 1,
-                  backgroundImage: `repeating-linear-gradient(to right, ${AXIS_GRID} 0px, ${AXIS_GRID} 1px, transparent 1px, transparent 5px)`,
+                  backgroundColor: AXIS_GRID_SOFT,
                 }}
               />
               {gridPrice != null && (
@@ -544,10 +545,15 @@ function makeMockData(): DataPoint[] {
 function Tile({
   title,
   children,
+  aspect,
+  maxWidth,
 }: {
   title: string
   children: React.ReactNode
+  aspect?: string
+  maxWidth?: number
 }) {
+  const fill = !!aspect
   return (
     <div
       style={{
@@ -558,6 +564,18 @@ function Tile({
         display: 'flex',
         flexDirection: 'column',
         gap: 32,
+        ...(fill
+          ? {
+              aspectRatio: aspect,
+              maxWidth,
+              width: '100%',
+              margin: '0 auto',
+              boxSizing: 'border-box' as const,
+              border: `2px solid ${WHITE}`, // white square outline around the canvas
+              borderRadius: 0,
+              backgroundColor: BG, // opaque so the background grid doesn't show through
+            }
+          : {}),
       }}
     >
       <span
@@ -574,10 +592,10 @@ function Tile({
       <div
         style={{
           display: 'flex',
-          alignItems: 'center',
+          alignItems: fill ? 'stretch' : 'center',
           justifyContent: 'center',
-          minHeight: 520,
           padding: '24px 0',
+          ...(fill ? { flex: 1, minHeight: 0 } : { minHeight: 520 }),
         }}
       >
         {children}
@@ -883,7 +901,7 @@ function useAverageColor(url: string | null | undefined): string | null {
 function CompareChart({
   artistA,
   artistB,
-  height: H = 420,
+  height: heightProp = 620,
   windowMs,
 }: {
   artistA: ArtistData | null
@@ -891,24 +909,28 @@ function CompareChart({
   height?: number
   windowMs?: number
 }) {
-  const svgRef = useRef<SVGSVGElement>(null)
+  const chartBoxRef = useRef<HTMLDivElement>(null)
   const uid = useId() // unique clip-path ids for the leading-edge avatars
   const [W, setW] = useState(700)
+  const [H, setH] = useState(heightProp) // chart-area height, measured so it fills the card
   const [cursorT, setCursorT] = useState(0) // 0..1 position within the replay
   const rafRef = useRef<number | null>(null)
   const startRef = useRef(0)
   const LEAD_R = 16 // leading-edge avatar radius
 
+  // The chart area fills whatever height the (fixed-ratio) card leaves, so we
+  // measure the container and drive the SVG + projections from that.
   useEffect(() => {
     const update = () => {
-      if (svgRef.current) {
-        const w = svgRef.current.getBoundingClientRect().width
-        if (w > 0) setW(w)
-      }
+      const el = chartBoxRef.current
+      if (!el) return
+      const r = el.getBoundingClientRect()
+      if (r.width > 0) setW(r.width)
+      if (r.height > 0) setH(r.height)
     }
     update()
     const ro = new ResizeObserver(update)
-    if (svgRef.current) ro.observe(svgRef.current)
+    if (chartBoxRef.current) ro.observe(chartBoxRef.current)
     return () => ro.disconnect()
   }, [])
 
@@ -1087,7 +1109,7 @@ function CompareChart({
   }
 
   return (
-    <div style={{ width: '100%', maxWidth: 760 }}>
+    <div style={{ width: '100%', maxWidth: 760, height: '100%', display: 'flex', flexDirection: 'column' }}>
       {/* One header per artist */}
       <div style={{ display: 'flex', gap: 24 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -1111,7 +1133,7 @@ function CompareChart({
       </div>
 
       {/* Shared chart: both lines overlaid on one growing, rescaling axis */}
-      <div style={{ width: '100%', height: H, position: 'relative' }}>
+      <div ref={chartBoxRef} style={{ width: '100%', flex: 1, minHeight: 0, position: 'relative' }}>
         {gridLines.map((price) => {
           const gy = PAD_T + (1 - (price - loP) / vRange) * chartAreaH
           return (
@@ -1123,7 +1145,7 @@ function CompareChart({
                   left: 0,
                   right: AXIS_YW,
                   height: 1,
-                  backgroundImage: `repeating-linear-gradient(to right, ${AXIS_GRID} 0px, ${AXIS_GRID} 1px, transparent 1px, transparent 5px)`,
+                  backgroundColor: AXIS_GRID_SOFT,
                 }}
               />
               <div
@@ -1168,7 +1190,7 @@ function CompareChart({
             pointerEvents: 'none',
           }}
         />
-        <svg ref={svgRef} width="100%" height={H} style={{ display: 'block', overflow: 'visible' }}>
+        <svg width="100%" height={H} style={{ display: 'block', overflow: 'visible' }}>
           {pathA && ptsA.length >= 2 && (
             <path
               d={pathA}
@@ -1254,6 +1276,8 @@ export default function LandingAnimations() {
       style={{
         minHeight: '100vh',
         backgroundColor: BG,
+        backgroundImage: `linear-gradient(to right, rgba(255,255,255,0.06) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,0.06) 1px, transparent 1px)`,
+        backgroundSize: '40px 40px',
         color: WHITE,
         fontFamily: FONT,
         padding: '64px 24px',
@@ -1327,15 +1351,12 @@ export default function LandingAnimations() {
           </Tile>
           )}
 
-          <Tile title="Compare (two artists)">
-            <div style={{ width: '100%', display: 'flex', justifyContent: 'center' }}>
-              <CompareChart
-                artistA={compareA}
-                artistB={compareB}
-                height={620}
-                windowMs={548 * 24 * 60 * 60 * 1000 /* ~18 months */}
-              />
-            </div>
+          <Tile title="Compare (two artists)" aspect="9 / 16" maxWidth={540}>
+            <CompareChart
+              artistA={compareA}
+              artistB={compareB}
+              windowMs={548 * 24 * 60 * 60 * 1000 /* ~18 months */}
+            />
           </Tile>
         </div>
       </div>
