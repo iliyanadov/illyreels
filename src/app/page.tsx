@@ -241,21 +241,16 @@ export default function Home() {
     // Check Google connection status from API
     checkGoogleConnection();
 
-    // Check for Meta connection status
+    // Surface any Instagram OAuth error returned in the URL, then ALWAYS
+    // re-check the Instagram connection. The meta_token cookie persists for 60
+    // days, so a plain refresh should restore the session — not only right
+    // after the OAuth redirect (this mirrors checkGoogleConnection above).
     const metaStatus = getMetaStatusFromUrl();
-    if (metaStatus) {
-      if (metaStatus.connected) {
-        // Fetch Instagram user info and accounts after successful connection
-        fetchInstagramUser();
-        fetchAllAccounts();
-      } else if (metaStatus.error) {
-        setMetaError(metaStatus.error);
-      }
-    } else {
-      // Also check for existing accounts on page load
-      fetchInstagramUser();
-      fetchAllAccounts();
+    if (metaStatus?.error) {
+      setMetaError(metaStatus.error);
     }
+    fetchInstagramUser();
+    fetchAllAccounts();
 
     // Check for Google connection status from URL (after OAuth redirect)
     const googleStatus = getGoogleStatusFromUrl();
@@ -662,6 +657,13 @@ export default function Home() {
 
     try {
       const res = await fetch('/api/meta/me');
+
+      if (res.status === 401 || res.status === 403) {
+        // Not connected (or the token expired) — a normal state on a fresh
+        // load, not an error to surface. Leave the section disconnected.
+        setIgUser(null);
+        return;
+      }
 
       if (!res.ok) {
         const data = await res.json();
