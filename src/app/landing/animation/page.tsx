@@ -1240,7 +1240,6 @@ function drawCompareFrame(
     const yStep = visYears <= 8 ? 1 : visYears <= 16 ? 2 : visYears <= 40 ? 5 : 10
     ctx.font = `12px ${FONT}`
     ctx.textBaseline = 'alphabetic'
-    ctx.textAlign = 'left'
     for (let y = y0; y <= y1; y++) {
       if ((y - y0) % yStep !== 0) continue
       const boundary = Math.max(new Date(y, 0, 1).getTime(), tStart)
@@ -1254,7 +1253,9 @@ function drawCompareFrame(
       ctx.lineTo(tx, baseY + 7)
       ctx.stroke()
       ctx.fillStyle = AXIS_YEAR
-      ctx.fillText(String(y), Math.round(lx) + 5, baseY + 24)
+      // centre each label under its tick; clamp the first/last so they stay on-canvas
+      ctx.textAlign = lx < 14 ? 'left' : lx > CHART_W - 14 ? 'right' : 'center'
+      ctx.fillText(String(y), lx, baseY + 24)
     }
   }
 
