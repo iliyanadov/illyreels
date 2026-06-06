@@ -144,6 +144,14 @@ const AXIS_PAD_B = 56
 const AXIS_MUTED = '#71717a'
 const AXIS_GRID = '#48484f'
 const AXIS_GRID_SOFT = 'rgba(255,255,255,0.08)' // solid (non-dashed) interior gridlines
+
+// Default comparison on first load (Spotify ids, present in both data files).
+const DEFAULT_A_ID = '3TVXtAsR1Inumwj472S9r4' // Drake
+const DEFAULT_B_ID = '2YZyLoL8N0Wb9xBt1NhZWg' // Kendrick Lamar
+
+// Max moving-average radius as a fraction of the series length (at smoothing 100).
+const SMOOTH_MAX_FRAC = 0.08
+
 function formatAxisDate(ms: number): string {
   const d = new Date(ms)
   return `${d.getMonth() + 1}/${d.getDate()}`
@@ -679,6 +687,10 @@ function ChartArtistHeader({
           justifyContent: 'center',
           gap: 12,
           flexWrap: 'wrap',
+          // Tabular digits so a rolling odometer never changes width — without
+          // this (plus the reserved min-widths below) the header reflows every
+          // frame and resizes the canvas, making the chart bob.
+          fontVariantNumeric: 'tabular-nums',
         }}
       >
         <span
@@ -689,6 +701,9 @@ function ChartArtistHeader({
             fontFamily: FONT,
             letterSpacing: '-0.02em',
             transition: 'color 0.6s ease',
+            display: 'inline-block',
+            minWidth: '3.5em',
+            textAlign: 'center',
           }}
         >
           <NumberFlow
@@ -730,7 +745,14 @@ function ChartArtistHeader({
                 <path fill="currentColor" d="m12 0 10.392 14.25H1.608z" />
               </svg>
               <span
-                style={{ color: chartColor, fontSize: 16, fontFamily: FONT }}
+                style={{
+                  color: chartColor,
+                  fontSize: 16,
+                  fontFamily: FONT,
+                  display: 'inline-block',
+                  minWidth: '4em',
+                  textAlign: 'left',
+                }}
               >
                 <NumberFlow
                   value={Math.abs(changeData.percentChange)}
@@ -743,7 +765,14 @@ function ChartArtistHeader({
               </span>
             </div>
             <span
-              style={{ color: chartColor, fontSize: 16, fontFamily: FONT }}
+              style={{
+                color: chartColor,
+                fontSize: 16,
+                fontFamily: FONT,
+                display: 'inline-block',
+                minWidth: '4em',
+                textAlign: 'left',
+              }}
             >
               <NumberFlow
                 value={Math.abs(changeData.rawChange)}
@@ -782,16 +811,45 @@ function seriesExtent(data: DataPoint[] | undefined): [number, number] | null {
 // selected (rather than downsampling the whole history first and losing it).
 function compareSeries(
   data: DataPoint[] | undefined,
-  range?: { start: number; end: number },
+  opts?: { start: number; end: number; smooth?: number; normalize?: boolean },
 ) {
   if (!data) return [] as { t: number; price: number }[]
   let pts = data
     .map((p) => ({ t: new Date(p.timestamp).getTime(), price: parseFloat(String(p.index)) }))
     .filter((p) => !isNaN(p.t) && !isNaN(p.price))
     .sort((a, b) => a.t - b.t)
-  if (range) {
-    const win = pts.filter((p) => p.t >= range.start && p.t <= range.end)
-    pts = win
+  if (opts) {
+    pts = pts.filter((p) => p.t >= opts.start && p.t <= opts.end)
+  }
+  // Smoothing: centred moving average whose window scales with the series
+  // length, so one 0–100 control behaves consistently for the daily Wikipedia
+  // and monthly Trends sources. Computed on the full windowed data BEFORE
+  // downsampling (O(N) via a prefix sum); the window shrinks at the edges.
+  if (opts?.smooth && opts.smooth > 0 && pts.length > 2) {
+    const radius = Math.round((opts.smooth / 100) * SMOOTH_MAX_FRAC * pts.length)
+    if (radius >= 1) {
+      const n = pts.length
+      const prefix = new Array<number>(n + 1)
+      prefix[0] = 0
+      for (let i = 0; i < n; i++) prefix[i + 1] = prefix[i] + pts[i].price
+      pts = pts.map((p, i) => {
+        const lo = Math.max(0, i - radius)
+        const hi = Math.min(n - 1, i + radius)
+        return { t: p.t, price: (prefix[hi + 1] - prefix[lo]) / (hi - lo + 1) }
+      })
+    }
+  }
+  // Normalise: min–max each series into 0–100 (own low → 0, high → 100) so two
+  // artists of very different magnitude are shape-comparable on one axis.
+  if (opts?.normalize && pts.length) {
+    let lo = Infinity
+    let hi = -Infinity
+    for (const p of pts) {
+      if (p.price < lo) lo = p.price
+      if (p.price > hi) hi = p.price
+    }
+    const span = hi - lo
+    pts = pts.map((p) => ({ t: p.t, price: span > 0 ? ((p.price - lo) / span) * 100 : 0 }))
   }
   if (pts.length > 200) {
     const step = (pts.length - 1) / 199
@@ -816,6 +874,99 @@ function valueAt(s: { t: number; price: number }[], time: number): number | null
     }
   }
   return s[s.length - 1].price
+}
+
+// 'YYYY-MM' bucket key (UTC) for grouping daily values into months.
+function monthKey(t: number): string {
+  const d = new Date(t)
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`
+}
+
+// Combined index: blend Wikipedia (daily) + Trends (monthly) into one monthly
+// series over their overlapping date range. Wikipedia is stored per-artist
+// normalised (each peaks at its own 100) and Trends is roster-scaled, so the two
+// are NOT on a common cross-artist scale — the only coherent blend with the
+// current data is to put BOTH on the same per-artist footing (scale each to its
+// own overlap peak -> 100), then weighted-average. Result: a per-artist
+// "consensus" popularity shape, 0..100.
+function buildCombined(
+  wiki: ArtistData | null,
+  trends: ArtistData | null,
+  wikiWeight = 0.5,
+): ArtistData | null {
+  if (!wiki && !trends) return null
+  const meta = wiki ?? trends
+  const parse = (d: ArtistData | null) =>
+    (d?.data_points ?? [])
+      .map((p) => ({ t: new Date(p.timestamp).getTime(), v: parseFloat(String(p.index)) }))
+      .filter((p) => !isNaN(p.t) && !isNaN(p.v))
+      .sort((a, b) => a.t - b.t)
+  const wPts = parse(wiki)
+  const tPts = parse(trends)
+
+  // Monthly average of the daily Wikipedia series, keyed by 'YYYY-MM'.
+  const wikiMonthly = new Map<string, { sum: number; n: number }>()
+  for (const p of wPts) {
+    const k = monthKey(p.t)
+    const cur = wikiMonthly.get(k) ?? { sum: 0, n: 0 }
+    cur.sum += p.v
+    cur.n += 1
+    wikiMonthly.set(k, cur)
+  }
+  const wikiAt = (t: number): number | null => {
+    const e = wikiMonthly.get(monthKey(t))
+    return e ? e.sum / e.n : null
+  }
+
+  // Grid of { month timestamp, wiki value, trends value }. Prefer the overlap
+  // (Trends months that have Wikipedia coverage); fall back to whichever source
+  // exists if the artist is missing from the other.
+  let grid: { t: number; w: number | null; tr: number | null }[]
+  if (wPts.length && tPts.length) {
+    // Overlap by MONTH (not raw timestamp): a Trends month is blended iff
+    // Wikipedia has that month, so a mid-month wiki start can't silently drop a
+    // month, and wikiAt() always resolves for the months we keep.
+    grid = tPts
+      .filter((tp) => wikiMonthly.has(monthKey(tp.t)))
+      .map((tp) => ({ t: tp.t, w: wikiAt(tp.t), tr: tp.v }))
+  } else if (tPts.length) {
+    grid = tPts.map((tp) => ({ t: tp.t, w: null, tr: tp.v }))
+  } else {
+    grid = Array.from(wikiMonthly.entries())
+      .map(([k, e]) => {
+        const [y, m] = k.split('-').map(Number)
+        return { t: Date.UTC(y, m - 1, 1), w: e.sum / e.n, tr: null as number | null }
+      })
+      .sort((a, b) => a.t - b.t)
+  }
+  if (!grid.length) return null
+
+  // Scale each source to its own peak over the grid (peak -> 100), preserving
+  // zeros and proportions, so neither source's unit scale dominates the blend.
+  let wMax = 0
+  let trMax = 0
+  for (const g of grid) {
+    if (g.w != null && g.w > wMax) wMax = g.w
+    if (g.tr != null && g.tr > trMax) trMax = g.tr
+  }
+  wMax = wMax || 1
+  trMax = trMax || 1
+  const wgt = Math.min(Math.max(wikiWeight, 0), 1)
+
+  const data_points: DataPoint[] = grid.map((g) => {
+    const wn = g.w == null ? null : (g.w / wMax) * 100
+    const tn = g.tr == null ? null : (g.tr / trMax) * 100
+    const val = wn != null && tn != null ? wgt * wn + (1 - wgt) * tn : (wn ?? tn ?? 0)
+    return { timestamp: new Date(g.t).toISOString(), index: Math.round(val * 100) / 100 }
+  })
+
+  return {
+    id: meta?.id,
+    name: meta?.name ?? '',
+    image_url: meta?.image_url ?? null,
+    index_price: data_points[data_points.length - 1]?.index ?? 0,
+    data_points,
+  }
 }
 
 // Gamma-correct, chroma-weighted average colour of a LOADED image: linearise out
@@ -931,6 +1082,17 @@ type DrawState = {
 
 const LEAD_R = 16 // leading-edge avatar radius
 
+// Compact number for axis / value labels — keeps large raw values (pageviews
+// can run to millions) from overflowing the narrow right gutter, while leaving
+// small values (e.g. normalised 0–100) at full precision.
+function fmtNum(v: number, smallDecimals: number): string {
+  const a = Math.abs(v)
+  if (a >= 1e9) return (v / 1e9).toFixed(1) + 'B'
+  if (a >= 1e6) return (v / 1e6).toFixed(1) + 'M'
+  if (a >= 1e3) return (v / 1e3).toFixed(1) + 'K'
+  return v.toFixed(smallDecimals)
+}
+
 // Pure imperative draw of one frame onto the 2D canvas (no React). Returns the
 // header readouts so the caller can throttle the NumberFlow counter updates.
 function drawCompareFrame(
@@ -1008,7 +1170,7 @@ function drawCompareFrame(
       ctx.stroke()
       ctx.fillStyle = AXIS_MUTED
       ctx.textAlign = 'right'
-      ctx.fillText(p.toFixed(2), w - 2, yOf(p))
+      ctx.fillText(fmtNum(p, 2), w - 2, yOf(p))
     }
   }
 
@@ -1090,16 +1252,28 @@ function drawCompareFrame(
       ctx.arc(lx, ly, 3.5, 0, Math.PI * 2)
       ctx.fill()
     }
-    const label = last.price.toFixed(1)
+    const label = fmtNum(last.price, 1)
     ctx.font = `700 13px ${FONT}`
-    ctx.textAlign = 'left'
     ctx.textBaseline = 'middle'
     ctx.lineJoin = 'round'
     ctx.lineWidth = 4
+    // The leading avatar is pinned to the plot's right edge, so the value tag
+    // prefers the right of the avatar but would run off the canvas there. Fall
+    // back to the left of the avatar (over the sparse plot) when there's no
+    // room on the right; the BG halo keeps it legible either way.
+    const labelW = ctx.measureText(label).width
+    const rightX = cx + LEAD_R + 5
+    let tx = rightX
+    if (rightX + labelW <= w - 2) {
+      ctx.textAlign = 'left'
+    } else {
+      ctx.textAlign = 'right'
+      tx = cx - LEAD_R - 5
+    }
     ctx.strokeStyle = BG
-    ctx.strokeText(label, cx + LEAD_R + 5, cy)
+    ctx.strokeText(label, tx, cy)
     ctx.fillStyle = WHITE
-    ctx.fillText(label, cx + LEAD_R + 5, cy)
+    ctx.fillText(label, tx, cy)
   }
   drawLead(revA, colorA, imgA)
   if (hasB) drawLead(revB, colorB, imgB)
@@ -1125,6 +1299,8 @@ function CompareChart({
   windowStart,
   windowEnd,
   loopMs = 8200,
+  normalised = false,
+  smoothing = 0,
 }: {
   artistA: ArtistData | null
   artistB: ArtistData | null
@@ -1132,6 +1308,8 @@ function CompareChart({
   windowStart?: number
   windowEnd?: number
   loopMs?: number
+  normalised?: boolean
+  smoothing?: number
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -1188,12 +1366,12 @@ function CompareChart({
   const tEndClamped = Math.max(Math.min(windowEnd ?? dataMax, dataMax), dataMin)
   const tEnd = tEndClamped > tStart ? tEndClamped : dataMax
   const sA = useMemo(
-    () => compareSeries(artistA?.data_points, { start: tStart, end: tEnd }),
-    [artistA, tStart, tEnd],
+    () => compareSeries(artistA?.data_points, { start: tStart, end: tEnd, smooth: smoothing, normalize: normalised }),
+    [artistA, tStart, tEnd, smoothing, normalised],
   )
   const sB = useMemo(
-    () => compareSeries(artistB?.data_points, { start: tStart, end: tEnd }),
-    [artistB, tStart, tEnd],
+    () => compareSeries(artistB?.data_points, { start: tStart, end: tEnd, smooth: smoothing, normalize: normalised }),
+    [artistB, tStart, tEnd, smoothing, normalised],
   )
   const gridStep = useMemo(() => {
     const fp = [...sA, ...sB].map((p) => p.price)
@@ -1226,7 +1404,7 @@ function CompareChart({
   })
 
   // Restart the replay timing when the selection / speed changes.
-  const dataKey = `${artistA?.name ?? ''}|${artistB?.name ?? ''}|${tStart}|${tEnd}|${loopMs}`
+  const dataKey = `${artistA?.name ?? ''}|${artistB?.name ?? ''}|${tStart}|${tEnd}|${loopMs}|${smoothing}|${normalised}`
   useEffect(() => {
     startRef.current = performance.now()
     scaleRef.current.ready = false // snap the scale to the new data
@@ -1408,6 +1586,150 @@ function ControlDate({
   )
 }
 
+function ControlToggle({
+  label,
+  checked,
+  onChange,
+}: {
+  label: string
+  checked: boolean
+  onChange: (v: boolean) => void
+}) {
+  return (
+    <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <span style={CONTROL_LABEL_STYLE}>{label}</span>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        onClick={() => onChange(!checked)}
+        style={{
+          ...CONTROL_INPUT_STYLE,
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          minHeight: 38,
+          background: checked ? 'rgba(4,223,157,0.12)' : CONTROL_INPUT_STYLE.background,
+          borderColor: checked ? POSITIVE : BORDER,
+          color: checked ? WHITE : SEC,
+        }}
+      >
+        <span
+          style={{
+            width: 34,
+            height: 18,
+            borderRadius: 999,
+            background: checked ? POSITIVE : 'rgba(255,255,255,0.15)',
+            position: 'relative',
+            transition: 'background 0.15s ease',
+            flexShrink: 0,
+          }}
+        >
+          <span
+            style={{
+              position: 'absolute',
+              top: 2,
+              left: checked ? 18 : 2,
+              width: 14,
+              height: 14,
+              borderRadius: '50%',
+              background: '#fff',
+              transition: 'left 0.15s ease',
+            }}
+          />
+        </span>
+        {checked ? 'On' : 'Off'}
+      </button>
+    </label>
+  )
+}
+
+function ControlSlider({
+  label,
+  value,
+  min,
+  max,
+  step,
+  onChange,
+}: {
+  label: string
+  value: number
+  min: number
+  max: number
+  step: number
+  onChange: (n: number) => void
+}) {
+  return (
+    <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <span style={CONTROL_LABEL_STYLE}>{label}</span>
+      <div style={{ height: 38, display: 'flex', alignItems: 'center' }}>
+        <input
+          type="range"
+          value={value}
+          min={min}
+          max={max}
+          step={step}
+          onChange={(e) => onChange(Number(e.target.value))}
+          style={{ accentColor: POSITIVE, width: 150, cursor: 'pointer' }}
+        />
+      </div>
+    </label>
+  )
+}
+
+function ControlSegmented({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string
+  value: string
+  options: { value: string; label: string }[]
+  onChange: (v: string) => void
+}) {
+  return (
+    <label style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'center' }}>
+      <span style={CONTROL_LABEL_STYLE}>{label}</span>
+      <div
+        style={{
+          display: 'inline-flex',
+          border: `1px solid ${BORDER}`,
+          borderRadius: 8,
+          overflow: 'hidden',
+          background: 'rgba(255,255,255,0.04)',
+        }}
+      >
+        {options.map((o) => {
+          const active = o.value === value
+          return (
+            <button
+              key={o.value}
+              type="button"
+              onClick={() => onChange(o.value)}
+              style={{
+                padding: '8px 16px',
+                fontSize: 14,
+                fontFamily: FONT,
+                cursor: 'pointer',
+                border: 'none',
+                background: active ? POSITIVE : 'transparent',
+                color: active ? '#0a0a0a' : SEC,
+                fontWeight: active ? 600 : 400,
+                whiteSpace: 'nowrap',
+                transition: 'background 0.15s ease, color 0.15s ease',
+              }}
+            >
+              {o.label}
+            </button>
+          )
+        })}
+      </div>
+    </label>
+  )
+}
+
 export default function LandingAnimations() {
   const { artists: heroArtists, trends: trendsArtists, loaded: heroLoaded } = useHeroArtists()
   const mockData = useMemo(makeMockData, [])
@@ -1466,13 +1788,19 @@ export default function LandingAnimations() {
   const [rangeStart, setRangeStart] = useState<number | null>(null)
   const [rangeEnd, setRangeEnd] = useState<number | null>(null)
   const [loopSeconds, setLoopSeconds] = useState(35) // full-loop target duration
+  const [normalised, setNormalised] = useState(false) // min–max each series to 0–100
+  const [smoothing, setSmoothing] = useState(0) // 0–100 moving-average strength
+  const [source, setSource] = useState<'wikipedia' | 'combined' | 'trends'>('combined')
 
-  // Defaults once the snapshot loads: first two artists, full date range.
+  // Defaults once the snapshot loads: Drake vs Kendrick Lamar, full date range.
   // (undefined = not yet initialised; null for artist B = user picked "None".)
   useEffect(() => {
     if (!heroArtists.length) return
-    setSelectedAId((cur) => cur ?? heroArtists[0]?.id ?? null)
-    setSelectedBId((cur) => (cur === undefined ? heroArtists[1]?.id ?? null : cur))
+    const has = (id: string) => heroArtists.some((a) => a.id === id)
+    const defA = has(DEFAULT_A_ID) ? DEFAULT_A_ID : heroArtists[0]?.id ?? null
+    const defB = has(DEFAULT_B_ID) ? DEFAULT_B_ID : heroArtists[1]?.id ?? null
+    setSelectedAId((cur) => cur ?? defA)
+    setSelectedBId((cur) => (cur === undefined ? defB : cur))
     setRangeStart((cur) => (cur == null ? dataMin : cur))
     setRangeEnd((cur) => (cur == null ? dataMax : cur))
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1486,6 +1814,14 @@ export default function LandingAnimations() {
   const wikiB = findB(heroArtists)
   const trendsA = findA(trendsArtists)
   const trendsB = findB(trendsArtists)
+  const combinedA = useMemo(() => buildCombined(wikiA, trendsA), [wikiA, trendsA])
+  const combinedB = useMemo(() => buildCombined(wikiB, trendsB), [wikiB, trendsB])
+  const sourceOptions = {
+    wikipedia: { a: wikiA, b: wikiB, title: 'Wikipedia pageviews (daily)' },
+    combined: { a: combinedA, b: combinedB, title: 'Combined (Wikipedia + Trends)' },
+    trends: { a: trendsA, b: trendsB, title: 'Google Trends (monthly)' },
+  }
+  const current = sourceOptions[source]
   const chartData = artist?.data_points ?? mockData
   const fallbackPrice =
     artist?.index_price ?? mockData[mockData.length - 1]?.index ?? 0
@@ -1612,34 +1948,45 @@ export default function LandingAnimations() {
                 step={1}
                 onChange={setLoopSeconds}
               />
+              <ControlToggle label="Normalise (0–100)" checked={normalised} onChange={setNormalised} />
+              <ControlSlider
+                label={`Smoothing${smoothing ? ` · ${smoothing}%` : ''}`}
+                value={smoothing}
+                min={0}
+                max={100}
+                step={5}
+                onChange={setSmoothing}
+              />
             </div>
 
-            {/* Both sources, same selection */}
+            {/* One selectable source at a time */}
             <div
               style={{
                 display: 'flex',
-                gap: 24,
-                alignItems: 'flex-start',
-                justifyContent: 'center',
-                flexWrap: 'wrap',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: 20,
               }}
             >
-              <Tile title="Wikipedia pageviews (daily)" aspect="9 / 16" maxWidth={500}>
+              <ControlSegmented
+                label="Source"
+                value={source}
+                onChange={(v) => setSource(v as 'wikipedia' | 'combined' | 'trends')}
+                options={[
+                  { value: 'wikipedia', label: 'Wikipedia' },
+                  { value: 'combined', label: 'Combined' },
+                  { value: 'trends', label: 'Google Trends' },
+                ]}
+              />
+              <Tile title={current.title} aspect="9 / 16" maxWidth={440}>
                 <CompareChart
-                  artistA={wikiA}
-                  artistB={wikiB}
+                  artistA={current.a}
+                  artistB={current.b}
                   windowStart={rangeStart ?? undefined}
                   windowEnd={rangeEnd ?? undefined}
                   loopMs={Math.max(loopSeconds, 1) * 1000}
-                />
-              </Tile>
-              <Tile title="Google Trends (monthly)" aspect="9 / 16" maxWidth={500}>
-                <CompareChart
-                  artistA={trendsA}
-                  artistB={trendsB}
-                  windowStart={rangeStart ?? undefined}
-                  windowEnd={rangeEnd ?? undefined}
-                  loopMs={Math.max(loopSeconds, 1) * 1000}
+                  normalised={normalised}
+                  smoothing={smoothing}
                 />
               </Tile>
             </div>
