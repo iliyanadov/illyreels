@@ -52,25 +52,6 @@ function lerpRGB(
 //   Hero artist fetching (same Spotify IDs as the landing)
 // ───────────────────────────────────────────────────────────────────────────
 
-// Same roster as the reel canvas carousel (TikTokCanvas INDEX_HERO_IDS)
-const HERO_IDS = [
-  '3TVXtAsR1Inumwj472S9r4', // Drake
-  '5K4W6rqBFWDnAN6FQUkS6x', // Kanye West
-  '2YZyLoL8N0Wb9xBt1NhZWg', // Kendrick Lamar
-  '7tYKF4w9nC0nq9CsPZTHyP', // SZA
-  '3DbwFQlvLxRSi2uX8mf81A', // Sexyy Red
-  '3fMbdgg4jU18AjLCKBhRSm', // Michael Jackson
-  '5pKCCKE2ajJHZ9KAiaK11H', // Rihanna
-  '0du5cEVh5yTK9QJze8zA0C', // Bruno Mars
-  '74KM79TiuVKeVCqs8QtB0B', // Sabrina Carpenter
-  '1uNFoZAHBGtllmzznpCI3s', // Justin Bieber
-  '1Xyo4u8uXC1ZmMpatF05PJ', // The Weeknd
-  '699OTQXzgjhIYAHMy9RyPD', // Playboi Carti
-  '4q3ewBCX7sLwd24euuV69X', // Bad Bunny
-  '7dGJo4pcD2V6oG8kP0tJRR', // Eminem
-  '0Y5tJX1MQlPlqiwlOH1tJY', // Travis Scott
-  '1McMsnEElThX1knmY4oliG', // Olivia Rodrigo
-]
 const HERO_INTERVAL_MS = 12000
 
 interface DataPoint {
@@ -91,41 +72,38 @@ function useHeroArtists() {
 
   useEffect(() => {
     let cancelled = false
-    Promise.all(
-      HERO_IDS.map(async (id) => {
-        // Retry once on a transient miss — 16 parallel fetches can briefly
-        // rate-limit the backend on a cold cache.
-        for (let attempt = 0; attempt < 2; attempt++) {
-          if (attempt > 0) await new Promise((r) => setTimeout(r, 400))
-          if (cancelled) return null
-          try {
-            const res = await fetch(
-              `/api/artist/${encodeURIComponent(id)}?slim=true`,
-            )
-            if (res.ok) {
-              const data = await res.json()
-              if (data?.artist) return data.artist as ArtistData
-            }
-          } catch {
-            // fall through to retry
-          }
-        }
-        return null
-      }),
-    ).then((rs) => {
-      if (cancelled) return
-      const list = rs.filter(Boolean) as ArtistData[]
-      // Non-deterministic shuffle so the chart cycles through artists in a
-      // random order (fresh each load), matching the reel canvas carousel.
+
+    // Non-deterministic shuffle so the chart picks a random pair each load.
+    const shuffle = (list: ArtistData[]) => {
       for (let i = list.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1))
         const tmp = list[i]
         list[i] = list[j]
         list[j] = tmp
       }
-      setArtists(list)
+      return list
+    }
+
+    // Data source: the pre-fetched Google Trends snapshot at
+    // public/trends-data.json (produced by `npm run fetch-trends`). The chart no
+    // longer calls the Sonotrade/index API — name, avatar and series are all
+    // baked into the snapshot, so there are zero data API calls at runtime.
+    ;(async () => {
+      let list: ArtistData[] = []
+      try {
+        const res = await fetch('/trends-data.json', { cache: 'force-cache' })
+        if (res.ok) {
+          const data = await res.json()
+          if (Array.isArray(data) && data.length) list = data as ArtistData[]
+        }
+      } catch {
+        // snapshot missing — leave the gallery empty until it's regenerated
+      }
+      if (cancelled) return
+      setArtists(shuffle(list))
       setLoaded(true)
-    })
+    })()
+
     return () => {
       cancelled = true
     }
@@ -610,12 +588,16 @@ function ChartArtistHeader({
   fallbackPrice,
   changeData,
   chartColor,
+  valuePrefix = '$',
+  valueUnit = 'pts',
 }: {
   artist: ArtistData | null
   drawingPrice: number | null
   fallbackPrice: number
   changeData: { percentChange: number; rawChange: number } | null
   chartColor: string
+  valuePrefix?: string
+  valueUnit?: string
 }) {
   const name = artist?.name ?? 'Loading…'
   const imageUrl = artist?.image_url
@@ -691,7 +673,7 @@ function ChartArtistHeader({
           <NumberFlow
             value={drawingPrice ?? fallbackPrice}
             format={{ minimumFractionDigits: 2, maximumFractionDigits: 2 }}
-            prefix="$"
+            prefix={valuePrefix}
           />
         </span>
         <span
@@ -702,7 +684,7 @@ function ChartArtistHeader({
             fontFamily: FONT,
           }}
         >
-          pts
+          {valueUnit}
         </span>
         {changeData && (
           <div
@@ -745,7 +727,7 @@ function ChartArtistHeader({
               <NumberFlow
                 value={Math.abs(changeData.rawChange)}
                 format={{ minimumFractionDigits: 2, maximumFractionDigits: 2 }}
-                prefix={changeData.rawChange >= 0 ? '+$' : '-$'}
+                prefix={(changeData.rawChange >= 0 ? '+' : '-') + valuePrefix}
               />
             </span>
           </div>
@@ -1024,12 +1006,20 @@ function CompareChart({
     }
   }
 
-  // X axis: one label per visible calendar year, centred under that year's span.
+  // X axis: year labels, thinned so they never overlap. The step is based on the
+  // FULL data span (stable through the replay), so a 22-year range collapses to a
+  // handful of labels while a short span still shows every year. Each label is
+  // centred under its year's visible span.
   const yearTicks: { year: number; left: number }[] = []
   if (winRange > 1 && CHART_W > 0) {
+    const fullY0 = new Date(tStart).getFullYear()
+    const fullY1 = new Date(tEnd).getFullYear()
+    const spanYears = fullY1 - fullY0 + 1
+    const yStep = spanYears <= 8 ? 1 : spanYears <= 16 ? 2 : spanYears <= 40 ? 5 : 10
     const y0 = new Date(tStart).getFullYear()
     const y1 = new Date(cursorTime).getFullYear()
     for (let y = y0; y <= y1; y++) {
+      if ((y - fullY0) % yStep !== 0) continue // thin to avoid label overlap
       const spanStart = Math.max(new Date(y, 0, 1).getTime(), tStart)
       const spanEnd = Math.min(new Date(y + 1, 0, 1).getTime(), cursorTime)
       const center = (spanStart + spanEnd) / 2
@@ -1119,6 +1109,8 @@ function CompareChart({
             fallbackPrice={artistA?.index_price ?? 0}
             changeData={chgFor(revA)}
             chartColor={colorA}
+            valuePrefix=""
+            valueUnit="pts"
           />
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -1128,6 +1120,8 @@ function CompareChart({
             fallbackPrice={artistB?.index_price ?? 0}
             changeData={chgFor(revB)}
             chartColor={colorB}
+            valuePrefix=""
+            valueUnit="pts"
           />
         </div>
       </div>
@@ -1352,11 +1346,8 @@ export default function LandingAnimations() {
           )}
 
           <Tile title="Compare (two artists)" aspect="9 / 16" maxWidth={540}>
-            <CompareChart
-              artistA={compareA}
-              artistB={compareB}
-              windowMs={548 * 24 * 60 * 60 * 1000 /* ~18 months */}
-            />
+            {/* No windowMs → show the full Google Trends history that was fetched */}
+            <CompareChart artistA={compareA} artistB={compareB} />
           </Tile>
         </div>
       </div>
