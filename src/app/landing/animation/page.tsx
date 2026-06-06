@@ -1483,6 +1483,14 @@ function CompareChart({
 
   return (
     <div style={{ width: '100%', maxWidth: 760, height: '100%', display: 'flex', flexDirection: 'column' }}>
+      <div ref={containerRef} style={{ width: '100%', flex: 1, minHeight: 0, position: 'relative' }}>
+        <canvas ref={canvasRef} style={{ display: 'block', width: '100%', height: '100%' }} />
+      </div>
+      {banner && (
+        <div style={{ display: 'flex', justifyContent: 'center', flexShrink: 0, padding: '6px 0' }}>
+          {banner}
+        </div>
+      )}
       <div style={{ display: 'flex', gap: compact ? 16 : 24, justifyContent: 'center' }}>
         <div style={{ flex: artistB ? '1 1 0' : '0 1 auto', minWidth: 0 }}>
           <ChartArtistHeader
@@ -1510,14 +1518,6 @@ function CompareChart({
             />
           </div>
         )}
-      </div>
-      {banner && (
-        <div style={{ display: 'flex', justifyContent: 'center', flexShrink: 0, padding: '6px 0' }}>
-          {banner}
-        </div>
-      )}
-      <div ref={containerRef} style={{ width: '100%', flex: 1, minHeight: 0, position: 'relative' }}>
-        <canvas ref={canvasRef} style={{ display: 'block', width: '100%', height: '100%' }} />
       </div>
     </div>
   )
