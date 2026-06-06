@@ -1483,7 +1483,18 @@ function CompareChart({
 
   return (
     <div style={{ width: '100%', maxWidth: 760, height: '100%', display: 'flex', flexDirection: 'column' }}>
-      <div ref={containerRef} style={{ width: '100%', flex: 1, minHeight: 0, position: 'relative' }}>
+      <div
+        ref={containerRef}
+        style={{
+          // trim 30px (of the 1080 design) off the right of the graph
+          width: `calc(100% - ${(30 * CANVAS_BASE_W) / CANVAS_DESIGN_W}px)`,
+          flex: 1,
+          minHeight: 0,
+          position: 'relative',
+          // nudge the whole chart left by 30px of the 1080 design
+          transform: `translateX(${(-30 * CANVAS_BASE_W) / CANVAS_DESIGN_W}px)`,
+        }}
+      >
         <canvas ref={canvasRef} style={{ display: 'block', width: '100%', height: '100%' }} />
       </div>
       {banner && (
@@ -1844,6 +1855,56 @@ function TapeTitle() {
   )
 }
 
+// Instagram Reels safe zone: UI-covered margins (px within the 1080x1920 frame).
+// Approximate — Instagram's overlay shifts — but match common 2025/26 guidance:
+// top profile/controls ~220, bottom caption/audio ~320, right buttons ~120, side
+// ~60. Toggleable guide; turn it off before exporting.
+const REELS_SAFE = { top: 220, bottom: 320, left: 60, right: 120 }
+
+function SafeZoneOverlay() {
+  const W = 1080
+  const H = 1920
+  const top = `${(REELS_SAFE.top / H) * 100}%`
+  const bottom = `${(REELS_SAFE.bottom / H) * 100}%`
+  const left = `${(REELS_SAFE.left / W) * 100}%`
+  const right = `${(REELS_SAFE.right / W) * 100}%`
+  const dim = 'rgba(244,63,63,0.26)'
+  const grid = 'rgba(255,255,255,0.20)'
+  const accent = '#04df9d'
+  const lbl: React.CSSProperties = {
+    position: 'absolute',
+    fontFamily: 'var(--font-geist-sans)',
+    fontSize: 9,
+    fontWeight: 700,
+    letterSpacing: '0.05em',
+    color: '#fff',
+  }
+  return (
+    <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 5 }}>
+      {/* dimmed unsafe margins */}
+      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: top, background: dim }} />
+      <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: bottom, background: dim }} />
+      <div style={{ position: 'absolute', top, bottom, left: 0, width: left, background: dim }} />
+      <div style={{ position: 'absolute', top, bottom, right: 0, width: right, background: dim }} />
+      {/* rule-of-thirds grid */}
+      <div style={{ position: 'absolute', top: 0, bottom: 0, left: '33.333%', width: 1, background: grid }} />
+      <div style={{ position: 'absolute', top: 0, bottom: 0, left: '66.667%', width: 1, background: grid }} />
+      <div style={{ position: 'absolute', left: 0, right: 0, top: '33.333%', height: 1, background: grid }} />
+      <div style={{ position: 'absolute', left: 0, right: 0, top: '66.667%', height: 1, background: grid }} />
+      {/* safe-zone outline */}
+      <div style={{ position: 'absolute', top, bottom, left, right, border: `1.5px dashed ${accent}`, boxSizing: 'border-box' }} />
+      {/* labels (px are in the 1080x1920 design) */}
+      <div style={{ ...lbl, top: 2, left: 0, right: 0, textAlign: 'center' }}>UNSAFE · top {REELS_SAFE.top}px</div>
+      <div style={{ ...lbl, bottom: 2, left: 0, right: 0, textAlign: 'center' }}>UNSAFE · bottom {REELS_SAFE.bottom}px</div>
+      <div style={{ ...lbl, top, left: 2, color: accent }}>{REELS_SAFE.left}</div>
+      <div style={{ ...lbl, top, right: 2, color: accent }}>{REELS_SAFE.right}</div>
+      <div style={{ ...lbl, top: `calc(${top} + 2px)`, left: `calc(${left} + 3px)`, color: accent }}>
+        SAFE {W - REELS_SAFE.left - REELS_SAFE.right}×{H - REELS_SAFE.top - REELS_SAFE.bottom}
+      </div>
+    </div>
+  )
+}
+
 export default function LandingAnimations() {
   const { artists: heroArtists, trends: trendsArtists, loaded: heroLoaded } = useHeroArtists()
   const mockData = useMemo(makeMockData, [])
@@ -1905,6 +1966,7 @@ export default function LandingAnimations() {
   const [normalised, setNormalised] = useState(false) // min–max each series to 0–100
   const [smoothing, setSmoothing] = useState(0) // 0–100 moving-average strength
   const [source, setSource] = useState<'wikipedia' | 'combined' | 'trends'>('combined')
+  const [showSafeZone, setShowSafeZone] = useState(false)
 
   // Defaults once the snapshot loads: Drake vs Kendrick Lamar, full date range.
   // (undefined = not yet initialised; null for artist B = user picked "None".)
@@ -2075,6 +2137,7 @@ export default function LandingAnimations() {
                 step={5}
                 onChange={setSmoothing}
               />
+              <ControlToggle label="Reels safe zone" checked={showSafeZone} onChange={setShowSafeZone} />
             </div>
 
             {/* One selectable source at a time */}
@@ -2114,6 +2177,7 @@ export default function LandingAnimations() {
                     transform: `scale(${CANVAS_SCALE})`,
                     transformOrigin: 'top left',
                     containerType: 'inline-size', // lets descendants size in cqw of the 1080 canvas
+                    position: 'relative',
                   }}
                 >
                 {/* 100px (of 1920) of dark canvas above the tape. */}
@@ -2169,6 +2233,7 @@ export default function LandingAnimations() {
                     pixelScale={CANVAS_RENDER_SCALE}
                   />
                 </div>
+                {showSafeZone && <SafeZoneOverlay />}
               </div>
               </div>
             </div>
