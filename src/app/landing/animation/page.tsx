@@ -153,6 +153,16 @@ const DEFAULT_B_ID = '2YZyLoL8N0Wb9xBt1NhZWg' // Kendrick Lamar
 // Max moving-average radius as a fraction of the series length (at smoothing 100).
 const SMOOTH_MAX_FRAC = 0.08
 
+// Render the reel canvas from its 1080x1920 design: lay it out at CANVAS_BASE_W
+// — where every size is tuned — then CSS-scale to CANVAS_OUT_W so proportions are
+// identical, and bump the chart canvas pixel ratio to match. CANVAS_PREVIEW
+// scales the on-screen size (0.5 = show the 1080 design at 50% → 540x960).
+const CANVAS_BASE_W = 440
+const CANVAS_DESIGN_W = 1080 // the 1080x1920 design space
+const CANVAS_PREVIEW = 0.5 // display the design at 50%
+const CANVAS_OUT_W = CANVAS_DESIGN_W * CANVAS_PREVIEW // 540
+const CANVAS_SCALE = CANVAS_OUT_W / CANVAS_BASE_W
+
 function formatAxisDate(ms: number): string {
   const d = new Date(ms)
   return `${d.getMonth() + 1}/${d.getDate()}`
@@ -1321,6 +1331,8 @@ function CompareChart({
   normalised = false,
   smoothing = 0,
   compact = false,
+  banner,
+  pixelScale = 1,
 }: {
   artistA: ArtistData | null
   artistB: ArtistData | null
@@ -1331,6 +1343,8 @@ function CompareChart({
   normalised?: boolean
   smoothing?: number
   compact?: boolean
+  banner?: React.ReactNode
+  pixelScale?: number
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -1360,13 +1374,15 @@ function CompareChart({
   }, [])
 
   // Size the canvas backing store for the device pixel ratio (crisp output).
+  // pixelScale bumps the resolution when the whole frame is CSS-scaled up, so the
+  // chart stays crisp at the larger size.
   useEffect(() => {
     const c = canvasRef.current
     if (!c) return
-    const dpr = window.devicePixelRatio || 1
+    const dpr = (window.devicePixelRatio || 1) * pixelScale
     c.width = Math.round(size.w * dpr)
     c.height = Math.round(size.h * dpr)
-  }, [size.w, size.h])
+  }, [size.w, size.h, pixelScale])
 
   // --- data prep (memoised; NOT recomputed per frame) ---
   const extentA = useMemo(() => seriesExtent(artistA?.data_points), [artistA])
@@ -1439,7 +1455,7 @@ function CompareChart({
       const st = drawRef.current
       const ctx = canvasRef.current?.getContext('2d')
       if (ctx && st) {
-        const dpr = window.devicePixelRatio || 1
+        const dpr = (window.devicePixelRatio || 1) * pixelScale
         const CYCLE = Math.max(loopMs, 1000)
         const GROW = CYCLE * 0.85
         const phase = (now - startRef.current) % CYCLE
@@ -1459,7 +1475,7 @@ function CompareChart({
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current)
     }
-  }, [loopMs])
+  }, [loopMs, pixelScale])
 
   return (
     <div style={{ width: '100%', maxWidth: 760, height: '100%', display: 'flex', flexDirection: 'column' }}>
@@ -1491,6 +1507,11 @@ function CompareChart({
           </div>
         )}
       </div>
+      {banner && (
+        <div style={{ display: 'flex', justifyContent: 'center', flexShrink: 0, padding: '6px 0' }}>
+          {banner}
+        </div>
+      )}
       <div ref={containerRef} style={{ width: '100%', flex: 1, minHeight: 0, position: 'relative' }}>
         <canvas ref={canvasRef} style={{ display: 'block', width: '100%', height: '100%' }} />
       </div>
@@ -2071,22 +2092,26 @@ export default function LandingAnimations() {
                   { value: 'trends', label: 'Google Trends' },
                 ]}
               />
-              {/* Fixed 1080x1920 canvas: white tape (300px) at the top, chart
-                  below. The artist header is compressed so the chart keeps its
-                  size within the fixed canvas. */}
-              <div
-                style={{
-                  width: '100%',
-                  maxWidth: 440,
-                  aspectRatio: '1080 / 1920',
-                  border: `2px solid ${WHITE}`,
-                  boxSizing: 'border-box',
-                  background: BG,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  margin: '0 auto',
-                }}
-              >
+              {/* Footprint reserves the true 1080x1920 output; the frame is laid
+                  out at CANVAS_BASE_W and CSS-scaled up to fill it (no downscale). */}
+              <div style={{ width: CANVAS_OUT_W, height: (CANVAS_OUT_W * 1920) / 1080, flexShrink: 0 }}>
+                {/* Fixed 1080x1920 canvas: white tape (300px) at the top, chart
+                    below. The artist header is compressed so the chart keeps its
+                    size within the fixed canvas. */}
+                <div
+                  style={{
+                    width: CANVAS_BASE_W,
+                    aspectRatio: '1080 / 1920',
+                    border: `2px solid ${WHITE}`,
+                    boxSizing: 'border-box',
+                    background: BG,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    transform: `scale(${CANVAS_SCALE})`,
+                    transformOrigin: 'top left',
+                    containerType: 'inline-size', // lets descendants size in cqw of the 1080 canvas
+                  }}
+                >
                 {/* 100px (of 1920) of dark canvas above the tape. */}
                 <div style={{ width: '100%', height: '5.2083%', flexShrink: 0 }} />
                 {/* White title tape — 1080x300 band (15.625% of the canvas),
@@ -2124,8 +2149,23 @@ export default function LandingAnimations() {
                     normalised={normalised}
                     smoothing={smoothing}
                     compact
+                    banner={
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src="/sonotrade-link-in-bio.png"
+                        alt="Sonotrade — Link in bio"
+                        style={{
+                          width: '33.3333cqw', // 360 of the 1080 canvas width
+                          aspectRatio: '10690 / 1350',
+                          height: 'auto',
+                          display: 'block',
+                        }}
+                      />
+                    }
+                    pixelScale={CANVAS_SCALE}
                   />
                 </div>
+              </div>
               </div>
             </div>
           </div>
