@@ -1802,7 +1802,7 @@ function TapeTitle() {
     const el = ref.current
     const box = el?.parentElement
     if (!el || !box) return
-    const maxW = box.clientWidth * 0.9
+    const maxW = box.clientWidth * 0.88889 // 960/1080 → wrap 60px from each edge
     const maxH = box.clientHeight * 0.88
     let lo = 8
     let hi = Math.max(12, box.clientHeight * 0.7)
@@ -1838,7 +1838,7 @@ function TapeTitle() {
       data-placeholder="Type a title…"
       onInput={fit}
       style={{
-        width: '90%',
+        width: '88.889%', // 960/1080 → wraps 60px (of 1080) from each edge
         outline: 'none',
         border: 'none',
         background: 'transparent',
@@ -1872,13 +1872,19 @@ function SafeZoneOverlay() {
   const dim = 'rgba(244,63,63,0.26)'
   const grid = 'rgba(255,255,255,0.20)'
   const accent = '#04df9d'
-  const lbl: React.CSSProperties = {
-    position: 'absolute',
+  const tag: React.CSSProperties = {
     fontFamily: 'var(--font-geist-sans)',
     fontSize: 9,
     fontWeight: 700,
-    letterSpacing: '0.05em',
     color: '#fff',
+    textShadow: '0 0 3px rgba(0,0,0,0.95), 0 0 2px rgba(0,0,0,0.95)',
+    whiteSpace: 'nowrap',
+  }
+  const band: React.CSSProperties = {
+    position: 'absolute',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
   }
   return (
     <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 5 }}>
@@ -1894,14 +1900,23 @@ function SafeZoneOverlay() {
       <div style={{ position: 'absolute', left: 0, right: 0, top: '66.667%', height: 1, background: grid }} />
       {/* safe-zone outline */}
       <div style={{ position: 'absolute', top, bottom, left, right, border: `1.5px dashed ${accent}`, boxSizing: 'border-box' }} />
-      {/* labels (px are in the 1080x1920 design) */}
-      <div style={{ ...lbl, top: 2, left: 0, right: 0, textAlign: 'center' }}>UNSAFE · top {REELS_SAFE.top}px</div>
-      <div style={{ ...lbl, bottom: 2, left: 0, right: 0, textAlign: 'center' }}>UNSAFE · bottom {REELS_SAFE.bottom}px</div>
-      <div style={{ ...lbl, top, left: 2, color: accent }}>{REELS_SAFE.left}</div>
-      <div style={{ ...lbl, top, right: 2, color: accent }}>{REELS_SAFE.right}</div>
-      <div style={{ ...lbl, top: `calc(${top} + 2px)`, left: `calc(${left} + 3px)`, color: accent }}>
-        SAFE {W - REELS_SAFE.left - REELS_SAFE.right}×{H - REELS_SAFE.top - REELS_SAFE.bottom}
+      {/* distance from each safe-zone edge to the canvas edge, centred in its
+          margin band (px in the 1080x1920) */}
+      <div style={{ ...band, top: 0, left: 0, right: 0, height: top }}>
+        <span style={tag}>{REELS_SAFE.top}px</span>
       </div>
+      <div style={{ ...band, bottom: 0, left: 0, right: 0, height: bottom }}>
+        <span style={tag}>{REELS_SAFE.bottom}px</span>
+      </div>
+      <div style={{ ...band, top, bottom, left: 0, width: left }}>
+        <span style={tag}>{REELS_SAFE.left}px</span>
+      </div>
+      <div style={{ ...band, top, bottom, right: 0, width: right }}>
+        <span style={tag}>{REELS_SAFE.right}px</span>
+      </div>
+      <span style={{ ...tag, position: 'absolute', top: `calc(${top} + 3px)`, left: `calc(${left} + 4px)`, color: accent }}>
+        SAFE {W - REELS_SAFE.left - REELS_SAFE.right}×{H - REELS_SAFE.top - REELS_SAFE.bottom}
+      </span>
     </div>
   )
 }
@@ -2181,14 +2196,15 @@ export default function LandingAnimations() {
                     position: 'relative',
                   }}
                 >
-                {/* 100px (of 1920) of dark canvas above the tape. */}
-                <div style={{ width: '100%', height: '5.2083%', flexShrink: 0 }} />
-                {/* White title tape — 1080x300 band (15.625% of the canvas),
-                    full-bleed, with centred editable black Geist text. */}
+                {/* 220px (of 1920) of dark canvas above the tape. */}
+                <div style={{ width: '100%', height: '11.4583%', flexShrink: 0 }} />
+                {/* White title tape — full-width 1080x250 band (13.021% of the
+                    canvas), starting at 220px and ending at 470px from the top,
+                    with centred editable black Geist text. */}
                 <div
                   style={{
                     width: '100%',
-                    height: '15.625%',
+                    height: '13.0208%',
                     flexShrink: 0,
                     background: WHITE,
                     display: 'flex',
