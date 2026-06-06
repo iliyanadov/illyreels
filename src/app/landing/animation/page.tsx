@@ -1491,8 +1491,9 @@ function CompareChart({
           flex: 1,
           minHeight: 0,
           position: 'relative',
-          // nudge the whole chart left by 30px of the 1080 design
-          transform: `translateX(${(-30 * CANVAS_BASE_W) / CANVAS_DESIGN_W}px)`,
+          // position the graph's left edge at 60px in the 1080 design (un-nudged
+          // it sits at the chart-area edge: border 2 + padding 32 = 34 base px)
+          transform: `translateX(${(60 * CANVAS_BASE_W) / CANVAS_DESIGN_W - 34}px)`,
         }}
       >
         <canvas ref={canvasRef} style={{ display: 'block', width: '100%', height: '100%' }} />
