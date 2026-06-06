@@ -142,6 +142,7 @@ const AXIS_YW = 44 // right gutter reserved for the y-axis price labels
 const AXIS_PAD_T = 40
 const AXIS_PAD_B = 56
 const AXIS_MUTED = '#71717a'
+const AXIS_YEAR = '#e4e4e7' // bright year labels along the timeline
 const AXIS_GRID = '#48484f'
 const AXIS_GRID_SOFT = 'rgba(255,255,255,0.08)' // solid (non-dashed) interior gridlines
 
@@ -1205,23 +1206,32 @@ function drawCompareFrame(
   drawLine(revA, colorA)
   if (hasB) drawLine(revB, colorB)
 
-  // year labels (thinned), centred under each year's visible span
+  // year ticks + labels: bright, evenly spaced at each year boundary, with a
+  // small tick — a clean timeline like the reference. Thinned by how many years
+  // are currently VISIBLE, so the growing window shows every year while zoomed
+  // in and sparser labels as it zooms out.
   if (winRange > 1) {
-    const fullY0 = new Date(tStart).getFullYear()
-    const fullY1 = new Date(tEnd).getFullYear()
-    const spanYears = fullY1 - fullY0 + 1
-    const yStep = spanYears <= 8 ? 1 : spanYears <= 16 ? 2 : spanYears <= 40 ? 5 : 10
     const y0 = new Date(tStart).getFullYear()
     const y1 = new Date(cursorTime).getFullYear()
-    ctx.fillStyle = AXIS_MUTED
+    const visYears = y1 - y0 + 1
+    const yStep = visYears <= 8 ? 1 : visYears <= 16 ? 2 : visYears <= 40 ? 5 : 10
+    ctx.font = `12px ${FONT}`
     ctx.textBaseline = 'alphabetic'
+    ctx.textAlign = 'left'
     for (let y = y0; y <= y1; y++) {
-      if ((y - fullY0) % yStep !== 0) continue
-      const spanStart = Math.max(new Date(y, 0, 1).getTime(), tStart)
-      const spanEnd = Math.min(new Date(y + 1, 0, 1).getTime(), cursorTime)
-      const lx = xOf((spanStart + spanEnd) / 2)
-      ctx.textAlign = lx <= CHART_W * 0.08 ? 'left' : lx >= CHART_W * 0.92 ? 'right' : 'center'
-      ctx.fillText(String(y), lx, h - 6)
+      if ((y - y0) % yStep !== 0) continue
+      const boundary = Math.max(new Date(y, 0, 1).getTime(), tStart)
+      const lx = xOf(boundary)
+      if (lx < -0.5 || lx > CHART_W) continue
+      const tx = Math.round(lx) + 0.5
+      ctx.strokeStyle = AXIS_GRID
+      ctx.lineWidth = 1
+      ctx.beginPath()
+      ctx.moveTo(tx, baseY)
+      ctx.lineTo(tx, baseY + 7)
+      ctx.stroke()
+      ctx.fillStyle = AXIS_YEAR
+      ctx.fillText(String(y), Math.round(lx) + 5, baseY + 24)
     }
   }
 
