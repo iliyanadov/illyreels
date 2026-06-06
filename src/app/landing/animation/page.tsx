@@ -12,7 +12,7 @@
  * src/app/landing/animation/page.tsx.
  */
 
-import React, { useEffect, useId, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import NumberFlow from '@number-flow/react'
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -762,8 +762,6 @@ function ChartArtistHeader({
 //   CompareChart — two artists side by side on one shared price scale
 // ───────────────────────────────────────────────────────────────────────────
 
-type CmpPt = { x: number; y: number; price: number }
-
 // Time extent [min, max] (ms) of an artist's raw data, for clamping the window.
 function seriesExtent(data: DataPoint[] | undefined): [number, number] | null {
   if (!data || !data.length) return null
@@ -820,15 +818,72 @@ function valueAt(s: { t: number; price: number }[], time: number): number | null
   return s[s.length - 1].price
 }
 
-// Representative colour of an artist's profile picture — used as their line
-// colour. We linearise each pixel out of sRGB and average in linear light (then
-// re-encode) for a gamma-correct mean, and we weight each pixel by its chroma
-// (max - min) so bright, colourful pixels dominate and neutral / grey (and
-// dark) ones barely count — otherwise the mean washes out to grey. i.scdn.co serves
-// `access-control-allow-origin: *`, so the canvas readback isn't tainted; on
-// the rare failure the hook returns null and the caller falls back to grey.
-function useAverageColor(url: string | null | undefined): string | null {
-  const [color, setColor] = useState<string | null>(null)
+// Gamma-correct, chroma-weighted average colour of a LOADED image: linearise out
+// of sRGB, weight each pixel by its chroma (bright/colourful pixels dominate),
+// average in linear light, re-encode. Used as each artist's line colour.
+function avgColorFromImage(img: HTMLImageElement): string | null {
+  const toLinear = (c: number) =>
+    c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)
+  const toSrgb = (l: number) =>
+    l <= 0.0031308 ? l * 12.92 : 1.055 * Math.pow(l, 1 / 2.4) - 0.055
+  const maxDim = 1024
+  const scale = Math.min(1, maxDim / Math.max(img.naturalWidth, img.naturalHeight, 1))
+  const w = Math.max(1, Math.round(img.naturalWidth * scale))
+  const h = Math.max(1, Math.round(img.naturalHeight * scale))
+  const canvas = document.createElement('canvas')
+  canvas.width = w
+  canvas.height = h
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return null
+  ctx.drawImage(img, 0, 0, w, h)
+  const { data } = ctx.getImageData(0, 0, w, h)
+  const CHROMA_POW = 2
+  let rl = 0
+  let gl = 0
+  let bl = 0
+  let wSum = 0
+  let rlFlat = 0
+  let glFlat = 0
+  let blFlat = 0
+  let n = 0
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i + 3] < 16) continue // skip near-transparent pixels
+    const sr = data[i] / 255
+    const sg = data[i + 1] / 255
+    const sb = data[i + 2] / 255
+    const chroma = Math.max(sr, sg, sb) - Math.min(sr, sg, sb)
+    const lr = toLinear(sr)
+    const lg = toLinear(sg)
+    const lb = toLinear(sb)
+    const cw = Math.pow(chroma, CHROMA_POW)
+    rl += cw * lr
+    gl += cw * lg
+    bl += cw * lb
+    wSum += cw
+    rlFlat += lr
+    glFlat += lg
+    blFlat += lb
+    n += 1
+  }
+  const useWeighted = wSum > 1e-3
+  const denom = useWeighted ? wSum : n
+  if (denom <= 0) return null
+  const er = useWeighted ? rl : rlFlat
+  const eg = useWeighted ? gl : glFlat
+  const eb = useWeighted ? bl : blFlat
+  return `rgb(${Math.round(toSrgb(er / denom) * 255)},${Math.round(toSrgb(eg / denom) * 255)},${Math.round(toSrgb(eb / denom) * 255)})`
+}
+
+// Loads an artist image once (CORS-safe) for BOTH its representative colour and
+// for drawing the leading-edge avatar onto the chart canvas.
+function useArtistImage(url: string | null | undefined): {
+  color: string | null
+  img: HTMLImageElement | null
+} {
+  const [res, setRes] = useState<{ color: string | null; img: HTMLImageElement | null }>({
+    color: null,
+    img: null,
+  })
   useEffect(() => {
     if (!url) return
     let cancelled = false
@@ -836,88 +891,231 @@ function useAverageColor(url: string | null | undefined): string | null {
     img.crossOrigin = 'anonymous'
     img.onload = () => {
       if (cancelled) return
+      let color: string | null = null
       try {
-        // sRGB (0..1) <-> linear-light, the standard sRGB transfer functions.
-        const toLinear = (c: number) =>
-          c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)
-        const toSrgb = (l: number) =>
-          l <= 0.0031308 ? l * 12.92 : 1.055 * Math.pow(l, 1 / 2.4) - 0.055
-
-        // Draw at (capped) native resolution so the browser's downscaler does
-        // not pre-average in gamma space and reintroduce the very error we're
-        // trying to avoid.
-        const maxDim = 1024
-        const scale = Math.min(
-          1,
-          maxDim / Math.max(img.naturalWidth, img.naturalHeight, 1),
-        )
-        const w = Math.max(1, Math.round(img.naturalWidth * scale))
-        const h = Math.max(1, Math.round(img.naturalHeight * scale))
-        const canvas = document.createElement('canvas')
-        canvas.width = w
-        canvas.height = h
-        const ctx = canvas.getContext('2d')
-        if (!ctx) return
-        ctx.drawImage(img, 0, 0, w, h)
-        const { data } = ctx.getImageData(0, 0, w, h)
-
-        // Weight each pixel by its chroma (max - min) so bright, colourful
-        // pixels dominate. Unlike HSV saturation, chroma is brightness-aware, so
-        // dark colours count proportionally less (and grey still counts as 0).
-        // Still averaged in linear light, then re-encoded.
-        const CHROMA_POW = 2 // higher = more strongly favour vivid pixels
-        let rl = 0
-        let gl = 0
-        let bl = 0
-        let wSum = 0 // sum of chroma weights
-        let rlFlat = 0
-        let glFlat = 0
-        let blFlat = 0
-        let n = 0 // plain pixel count (greyscale fallback)
-        for (let i = 0; i < data.length; i += 4) {
-          if (data[i + 3] < 16) continue // skip near-transparent pixels
-          const sr = data[i] / 255
-          const sg = data[i + 1] / 255
-          const sb = data[i + 2] / 255
-          const maxc = Math.max(sr, sg, sb)
-          const minc = Math.min(sr, sg, sb)
-          const chroma = maxc - minc // 0 for grey, low for dark colours, high for bright vivid
-          const lr = toLinear(sr)
-          const lg = toLinear(sg)
-          const lb = toLinear(sb)
-          const w = Math.pow(chroma, CHROMA_POW)
-          rl += w * lr
-          gl += w * lg
-          bl += w * lb
-          wSum += w
-          rlFlat += lr
-          glFlat += lg
-          blFlat += lb
-          n += 1
-        }
-        // Use the saturation-weighted mean; fall back to the plain mean only if
-        // the cover is essentially greyscale (no colour worth weighting).
-        const useWeighted = wSum > 1e-3
-        const denom = useWeighted ? wSum : n
-        const er = useWeighted ? rl : rlFlat
-        const eg = useWeighted ? gl : glFlat
-        const eb = useWeighted ? bl : blFlat
-        if (denom > 0) {
-          const r = Math.round(toSrgb(er / denom) * 255)
-          const g = Math.round(toSrgb(eg / denom) * 255)
-          const b = Math.round(toSrgb(eb / denom) * 255)
-          setColor(`rgb(${r},${g},${b})`)
-        }
+        color = avgColorFromImage(img)
       } catch {
-        // Tainted canvas / read failure — keep the fallback colour
+        // tainted / read failure — fall back to a neutral colour
       }
+      setRes({ color, img })
     }
     img.src = url
     return () => {
       cancelled = true
     }
   }, [url])
-  return color
+  return res
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+//   CompareChart — canvas-rendered, 60fps replay of two artists
+// ───────────────────────────────────────────────────────────────────────────
+
+type Pt = { t: number; price: number }
+type HeadChg = { rawChange: number; percentChange: number } | null
+type HeadData = { aP: number | null; aC: HeadChg; bP: number | null; bC: HeadChg }
+type DrawState = {
+  w: number
+  h: number
+  sA: Pt[]
+  sB: Pt[]
+  colorA: string
+  colorB: string
+  imgA: HTMLImageElement | null
+  imgB: HTMLImageElement | null
+  tStart: number
+  tEnd: number
+  gridStep: number
+  hasB: boolean
+}
+
+const LEAD_R = 16 // leading-edge avatar radius
+
+// Pure imperative draw of one frame onto the 2D canvas (no React). Returns the
+// header readouts so the caller can throttle the NumberFlow counter updates.
+function drawCompareFrame(
+  ctx: CanvasRenderingContext2D,
+  st: DrawState,
+  dpr: number,
+  cursorT: number,
+  scale: { loP: number; vRange: number; ready: boolean },
+): HeadData {
+  const { w, h, sA, sB, colorA, colorB, imgA, imgB, tStart, tEnd, gridStep, hasB } = st
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  ctx.clearRect(0, 0, w, h)
+
+  const PAD_T = AXIS_PAD_T
+  const PAD_B = AXIS_PAD_B
+  const chartAreaH = h - PAD_T - PAD_B
+  const CHART_W = Math.max(0, w - AXIS_YW)
+  const empty: HeadData = { aP: null, aC: null, bP: null, bC: null }
+  if (chartAreaH <= 0 || CHART_W <= 0) return empty
+
+  const fullSpan = Math.max(tEnd - tStart, 1)
+  const minWin = Math.min(30 * 24 * 60 * 60 * 1000, fullSpan)
+  const cursorTime = tStart + minWin + cursorT * (fullSpan - minWin)
+  const winRange = Math.max(cursorTime - tStart, 1)
+
+  const reveal = (s: Pt[]): Pt[] => {
+    const out = s.filter((p) => p.t <= cursorTime)
+    const lead = valueAt(s, cursorTime)
+    if (lead != null && (!out.length || out[out.length - 1].t < cursorTime)) {
+      out.push({ t: cursorTime, price: lead })
+    }
+    return out
+  }
+  const revA = reveal(sA)
+  const revB = hasB ? reveal(sB) : []
+
+  const rPrices = [...revA, ...revB].map((p) => p.price)
+  const minP = rPrices.length ? Math.min(...rPrices) : 0
+  const maxP = rPrices.length ? Math.max(...rPrices) : 1
+  const pRange = maxP === minP ? 1 : maxP - minP
+  const PAD = pRange * 0.08
+  const targetLo = minP - PAD
+  const targetV = pRange + 2 * PAD
+  // Ease the y-scale toward its target so newly-revealed highs/lows don't pop
+  // the whole line vertically — the main source of the "sudden" jolts. The
+  // caller snaps `ready=false` at the loop restart for a clean reset.
+  if (!scale.ready) {
+    scale.loP = targetLo
+    scale.vRange = targetV
+    scale.ready = true
+  } else {
+    const k = 0.12
+    scale.loP += (targetLo - scale.loP) * k
+    scale.vRange += (targetV - scale.vRange) * k
+  }
+  const loP = scale.loP
+  const vRange = scale.vRange
+
+  const xOf = (t: number) => ((t - tStart) / winRange) * CHART_W
+  const yOf = (price: number) => PAD_T + (1 - (price - loP) / vRange) * chartAreaH
+
+  // round-number gridlines + right-edge price labels
+  ctx.textBaseline = 'middle'
+  ctx.font = `10px ${FONT}`
+  if (rPrices.length && gridStep > 0 && vRange > 0) {
+    const hiP = loP + vRange
+    const first = Math.ceil(loP / gridStep) * gridStep
+    for (let p = first, g = 0; p <= hiP + 1e-6 && g < 100; p += gridStep, g++) {
+      const gy = Math.round(yOf(p)) + 0.5
+      ctx.strokeStyle = AXIS_GRID_SOFT
+      ctx.lineWidth = 1
+      ctx.beginPath()
+      ctx.moveTo(0, gy)
+      ctx.lineTo(CHART_W, gy)
+      ctx.stroke()
+      ctx.fillStyle = AXIS_MUTED
+      ctx.textAlign = 'right'
+      ctx.fillText(p.toFixed(2), w - 2, yOf(p))
+    }
+  }
+
+  // solid L-axes (always present)
+  ctx.strokeStyle = AXIS_GRID
+  ctx.lineWidth = 1
+  const baseY = Math.round(PAD_T + chartAreaH) + 0.5
+  ctx.beginPath()
+  ctx.moveTo(0, baseY)
+  ctx.lineTo(CHART_W, baseY)
+  ctx.stroke()
+  ctx.beginPath()
+  ctx.moveTo(0.5, PAD_T)
+  ctx.lineTo(0.5, PAD_T + chartAreaH)
+  ctx.stroke()
+
+  const drawLine = (rev: Pt[], color: string) => {
+    if (rev.length < 2) return
+    ctx.strokeStyle = color
+    ctx.lineWidth = 2
+    ctx.lineJoin = 'round'
+    ctx.lineCap = 'round'
+    ctx.beginPath()
+    for (let i = 0; i < rev.length; i++) {
+      const x = xOf(rev[i].t)
+      const y = yOf(rev[i].price)
+      if (i === 0) ctx.moveTo(x, y)
+      else ctx.lineTo(x, y)
+    }
+    ctx.stroke()
+  }
+  drawLine(revA, colorA)
+  if (hasB) drawLine(revB, colorB)
+
+  // year labels (thinned), centred under each year's visible span
+  if (winRange > 1) {
+    const fullY0 = new Date(tStart).getFullYear()
+    const fullY1 = new Date(tEnd).getFullYear()
+    const spanYears = fullY1 - fullY0 + 1
+    const yStep = spanYears <= 8 ? 1 : spanYears <= 16 ? 2 : spanYears <= 40 ? 5 : 10
+    const y0 = new Date(tStart).getFullYear()
+    const y1 = new Date(cursorTime).getFullYear()
+    ctx.fillStyle = AXIS_MUTED
+    ctx.textBaseline = 'alphabetic'
+    for (let y = y0; y <= y1; y++) {
+      if ((y - fullY0) % yStep !== 0) continue
+      const spanStart = Math.max(new Date(y, 0, 1).getTime(), tStart)
+      const spanEnd = Math.min(new Date(y + 1, 0, 1).getTime(), cursorTime)
+      const lx = xOf((spanStart + spanEnd) / 2)
+      ctx.textAlign = lx <= CHART_W * 0.08 ? 'left' : lx >= CHART_W * 0.92 ? 'right' : 'center'
+      ctx.fillText(String(y), lx, h - 6)
+    }
+  }
+
+  // leading-edge avatar + current-value label, per artist
+  const drawLead = (rev: Pt[], color: string, img: HTMLImageElement | null) => {
+    if (rev.length < 2) return
+    const last = rev[rev.length - 1]
+    const lx = xOf(last.t)
+    const ly = yOf(last.price)
+    const cx = lx + LEAD_R
+    const cy = ly
+    if (img) {
+      ctx.save()
+      ctx.beginPath()
+      ctx.arc(cx, cy, LEAD_R, 0, Math.PI * 2)
+      ctx.closePath()
+      ctx.clip()
+      ctx.drawImage(img, cx - LEAD_R, cy - LEAD_R, LEAD_R * 2, LEAD_R * 2)
+      ctx.restore()
+      ctx.strokeStyle = color
+      ctx.lineWidth = 2.5
+      ctx.beginPath()
+      ctx.arc(cx, cy, LEAD_R, 0, Math.PI * 2)
+      ctx.stroke()
+    } else {
+      ctx.fillStyle = color
+      ctx.beginPath()
+      ctx.arc(lx, ly, 3.5, 0, Math.PI * 2)
+      ctx.fill()
+    }
+    const label = last.price.toFixed(1)
+    ctx.font = `700 13px ${FONT}`
+    ctx.textAlign = 'left'
+    ctx.textBaseline = 'middle'
+    ctx.lineJoin = 'round'
+    ctx.lineWidth = 4
+    ctx.strokeStyle = BG
+    ctx.strokeText(label, cx + LEAD_R + 5, cy)
+    ctx.fillStyle = WHITE
+    ctx.fillText(label, cx + LEAD_R + 5, cy)
+  }
+  drawLead(revA, colorA, imgA)
+  if (hasB) drawLead(revB, colorB, imgB)
+
+  const chg = (rev: Pt[]): HeadChg => {
+    if (rev.length < 2) return null
+    const f = rev[0].price
+    const l = rev[rev.length - 1].price
+    return { rawChange: l - f, percentChange: f > 0 ? ((l - f) / f) * 100 : 0 }
+  }
+  return {
+    aP: revA.length ? revA[revA.length - 1].price : null,
+    aC: chg(revA),
+    bP: revB.length ? revB[revB.length - 1].price : null,
+    bC: chg(revB),
+  }
 }
 
 function CompareChart({
@@ -935,33 +1133,43 @@ function CompareChart({
   windowEnd?: number
   loopMs?: number
 }) {
-  const chartBoxRef = useRef<HTMLDivElement>(null)
-  const uid = useId() // unique clip-path ids for the leading-edge avatars
-  const [W, setW] = useState(700)
-  const [H, setH] = useState(heightProp) // chart-area height, measured so it fills the card
-  const [cursorT, setCursorT] = useState(0) // 0..1 position within the replay
+  const containerRef = useRef<HTMLDivElement>(null)
+  const canvasRef = useRef<HTMLCanvasElement>(null)
   const rafRef = useRef<number | null>(null)
   const startRef = useRef(0)
-  const LEAD_R = 16 // leading-edge avatar radius
+  const headTimeRef = useRef(0)
+  const drawRef = useRef<DrawState | null>(null)
+  const scaleRef = useRef({ loP: 0, vRange: 1, ready: false }) // eased y-scale (persists across frames)
+  const lastTRef = useRef(0)
+  const [size, setSize] = useState({ w: 700, h: heightProp })
+  const [head, setHead] = useState<HeadData>({ aP: null, aC: null, bP: null, bC: null })
 
-  // The chart area fills whatever height the (fixed-ratio) card leaves, so we
-  // measure the container and drive the SVG + projections from that.
+  // Measure the chart container (fills the card's leftover height).
   useEffect(() => {
     const update = () => {
-      const el = chartBoxRef.current
+      const el = containerRef.current
       if (!el) return
       const r = el.getBoundingClientRect()
-      if (r.width > 0) setW(r.width)
-      if (r.height > 0) setH(r.height)
+      if (r.width > 0 && r.height > 0) {
+        setSize((s) => (s.w === r.width && s.h === r.height ? s : { w: r.width, h: r.height }))
+      }
     }
     update()
     const ro = new ResizeObserver(update)
-    if (chartBoxRef.current) ro.observe(chartBoxRef.current)
+    if (containerRef.current) ro.observe(containerRef.current)
     return () => ro.disconnect()
   }, [])
 
-  // Extent of the available data across the selected artist(s) (from raw data,
-  // before any downsampling — so clamping the window is exact).
+  // Size the canvas backing store for the device pixel ratio (crisp output).
+  useEffect(() => {
+    const c = canvasRef.current
+    if (!c) return
+    const dpr = window.devicePixelRatio || 1
+    c.width = Math.round(size.w * dpr)
+    c.height = Math.round(size.h * dpr)
+  }, [size.w, size.h])
+
+  // --- data prep (memoised; NOT recomputed per frame) ---
   const extentA = useMemo(() => seriesExtent(artistA?.data_points), [artistA])
   const extentB = useMemo(() => seriesExtent(artistB?.data_points), [artistB])
   const dataMin = useMemo(() => {
@@ -976,14 +1184,9 @@ function CompareChart({
     if (extentB) l.push(extentB[1])
     return l.length ? Math.max(...l) : 1
   }, [extentA, extentB])
-
-  // Selected window, clamped to the available data (falls back to full extent).
   const tStart = Math.min(Math.max(windowStart ?? dataMin, dataMin), dataMax)
   const tEndClamped = Math.max(Math.min(windowEnd ?? dataMax, dataMax), dataMin)
   const tEnd = tEndClamped > tStart ? tEndClamped : dataMax
-
-  // Series filtered to the window FIRST, then downsampled — preserves daily
-  // detail inside whatever range is selected. The replay reveals within it.
   const sA = useMemo(
     () => compareSeries(artistA?.data_points, { start: tStart, end: tEnd }),
     [artistA, tStart, tEnd],
@@ -992,200 +1195,82 @@ function CompareChart({
     () => compareSeries(artistB?.data_points, { start: tStart, end: tEnd }),
     [artistB, tStart, tEnd],
   )
+  const gridStep = useMemo(() => {
+    const fp = [...sA, ...sB].map((p) => p.price)
+    const lo = fp.length ? Math.min(...fp) : 0
+    const hi = fp.length ? Math.max(...fp) : 1
+    return niceStep(hi - lo || 1, 6)
+  }, [sA, sB])
 
-  // Looping cursor: grow the window, hold briefly at full, reset, repeat. The
-  // total loop time is `loopMs` (user-controlled), split ~85% growth / 15% hold.
-  // Re-keyed on the window + loopMs so changing artists/dates/speed restarts it.
-  const dataKey = `${artistA?.name ?? ''}|${artistB?.name ?? ''}|${tStart}|${tEnd}|${sA.length}|${sB.length}`
+  const { color: colA, img: imgA } = useArtistImage(artistA?.image_url)
+  const { color: colB, img: imgB } = useArtistImage(artistB?.image_url)
+  const colorA = colA ?? '#9ca3af'
+  const colorB = colB ?? '#9ca3af'
+
+  // Publish the latest draw inputs to a ref the rAF loop reads (no per-frame React).
   useEffect(() => {
-    if (sA.length < 2 && sB.length < 2) return
-    if (rafRef.current) cancelAnimationFrame(rafRef.current)
-    startRef.current = performance.now()
-    const CYCLE = Math.max(loopMs, 1000) // total loop duration
-    const GROW = CYCLE * 0.85 // growth phase
-    const animate = (now: number) => {
-      const phase = (now - startRef.current) % CYCLE
-      setCursorT(Math.min(phase / GROW, 1)) // holds at 1 during the final ~15%
-      rafRef.current = requestAnimationFrame(animate)
+    drawRef.current = {
+      w: size.w,
+      h: size.h,
+      sA,
+      sB,
+      colorA,
+      colorB,
+      imgA,
+      imgB,
+      tStart,
+      tEnd,
+      gridStep,
+      hasB: !!artistB,
     }
-    rafRef.current = requestAnimationFrame(animate)
+  })
+
+  // Restart the replay timing when the selection / speed changes.
+  const dataKey = `${artistA?.name ?? ''}|${artistB?.name ?? ''}|${tStart}|${tEnd}|${loopMs}`
+  useEffect(() => {
+    startRef.current = performance.now()
+    scaleRef.current.ready = false // snap the scale to the new data
+    lastTRef.current = 0
+  }, [dataKey])
+
+  // Single rAF loop: imperative canvas draw at 60fps; header values throttled.
+  useEffect(() => {
+    startRef.current = performance.now()
+    const loop = (now: number) => {
+      const st = drawRef.current
+      const ctx = canvasRef.current?.getContext('2d')
+      if (ctx && st) {
+        const dpr = window.devicePixelRatio || 1
+        const CYCLE = Math.max(loopMs, 1000)
+        const GROW = CYCLE * 0.85
+        const phase = (now - startRef.current) % CYCLE
+        const rawT = Math.min(phase / GROW, 1)
+        const cursorT = rawT * rawT * (3 - 2 * rawT) // smoothstep ease-in-out
+        if (cursorT < lastTRef.current - 1e-3) scaleRef.current.ready = false // loop restart -> snap
+        lastTRef.current = cursorT
+        const hd = drawCompareFrame(ctx, st, dpr, cursorT, scaleRef.current)
+        if (now - headTimeRef.current > 180) {
+          headTimeRef.current = now
+          setHead(hd)
+        }
+      }
+      rafRef.current = requestAnimationFrame(loop)
+    }
+    rafRef.current = requestAnimationFrame(loop)
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dataKey, loopMs])
-
-  const PAD_T = AXIS_PAD_T
-  const PAD_B = AXIS_PAD_B
-  const chartAreaH = H - PAD_T - PAD_B
-  const CHART_W = Math.max(0, W - AXIS_YW)
-
-  // Window left edge pinned at tStart (18 months ago); the cursor (right edge)
-  // advances toward tEnd. Starts ~1 month wide so there is always a line and a
-  // leading point sitting on the right edge.
-  const fullSpan = Math.max(tEnd - tStart, 1)
-  const minWin = Math.min(30 * 24 * 60 * 60 * 1000, fullSpan)
-  const cursorTime = tStart + minWin + cursorT * (fullSpan - minWin)
-  const winRange = Math.max(cursorTime - tStart, 1)
-
-  // Reveal each series up to the cursor, plus an interpolated point AT the
-  // cursor so the leading edge glides smoothly between samples.
-  const reveal = (s: { t: number; price: number }[]) => {
-    const out = s.filter((p) => p.t <= cursorTime)
-    const lead = valueAt(s, cursorTime)
-    if (lead != null && (!out.length || out[out.length - 1].t < cursorTime)) {
-      out.push({ t: cursorTime, price: lead })
-    }
-    return out
-  }
-  const revA = reveal(sA)
-  const revB = reveal(sB)
-
-  // Price (y) scale from the REVEALED data of both artists, so the horizontal
-  // gridlines rescale up/down as the window grows.
-  const rPrices = [...revA, ...revB].map((p) => p.price)
-  const minP = rPrices.length ? Math.min(...rPrices) : 0
-  const maxP = rPrices.length ? Math.max(...rPrices) : 1
-  const pRange = maxP === minP ? 1 : maxP - minP
-  const PAD = pRange * 0.08
-  const loP = minP - PAD
-  const vRange = pRange + 2 * PAD
-
-  // Round-number y gridlines. The step is sized to the FULL data range (fixed
-  // for the whole replay), so as the revealed range grows, more lines spawn in.
-  const fullPrices = [...sA, ...sB].map((p) => p.price)
-  const fullMin = fullPrices.length ? Math.min(...fullPrices) : 0
-  const fullMax = fullPrices.length ? Math.max(...fullPrices) : 1
-  const gridStep = niceStep((fullMax - fullMin) || 1, 6)
-  const gridLines: number[] = []
-  if (rPrices.length && gridStep > 0 && vRange > 0) {
-    const hiP = loP + vRange
-    const firstLine = Math.ceil(loP / gridStep) * gridStep
-    for (let p = firstLine, guard = 0; p <= hiP + 1e-6 && guard < 100; p += gridStep, guard++) {
-      gridLines.push(p)
-    }
-  }
-
-  // X axis: year labels, thinned so they never overlap. The step is based on the
-  // FULL data span (stable through the replay), so a 22-year range collapses to a
-  // handful of labels while a short span still shows every year. Each label is
-  // centred under its year's visible span.
-  const yearTicks: { year: number; left: number }[] = []
-  if (winRange > 1 && CHART_W > 0) {
-    const fullY0 = new Date(tStart).getFullYear()
-    const fullY1 = new Date(tEnd).getFullYear()
-    const spanYears = fullY1 - fullY0 + 1
-    const yStep = spanYears <= 8 ? 1 : spanYears <= 16 ? 2 : spanYears <= 40 ? 5 : 10
-    const y0 = new Date(tStart).getFullYear()
-    const y1 = new Date(cursorTime).getFullYear()
-    for (let y = y0; y <= y1; y++) {
-      if ((y - fullY0) % yStep !== 0) continue // thin to avoid label overlap
-      const spanStart = Math.max(new Date(y, 0, 1).getTime(), tStart)
-      const spanEnd = Math.min(new Date(y + 1, 0, 1).getTime(), cursorTime)
-      const center = (spanStart + spanEnd) / 2
-      const left = ((center - tStart) / winRange) * (CHART_W / Math.max(W, 1)) * 100
-      yearTicks.push({ year: y, left })
-    }
-  }
-
-  // Project the revealed window [tStart, cursorTime] across the full width, so
-  // the leading point sits on the right edge and the axis rescales as it grows.
-  const project = (s: { t: number; price: number }[]): CmpPt[] =>
-    s.map((p) => ({
-      x: ((p.t - tStart) / winRange) * CHART_W,
-      y: PAD_T + (1 - (p.price - loP) / vRange) * chartAreaH,
-      price: p.price,
-    }))
-  const ptsA = project(revA)
-  const ptsB = project(revB)
-
-  // Straight segments between points. Daily data is dense enough to read as a
-  // smooth line without spline interpolation.
-  const pathStr = (pts: CmpPt[]) =>
-    pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')
-  const pathA = pathStr(ptsA)
-  const pathB = pathStr(ptsB)
-
-  // Fixed line colour = the average colour of each artist's profile picture
-  // (no trend-based green/red, and it no longer animates).
-  const colorA = useAverageColor(artistA?.image_url) ?? '#9ca3af'
-  const colorB = useAverageColor(artistB?.image_url) ?? '#9ca3af'
-
-  // Leading point (right edge) drives the dot + the header readout.
-  const leadA = ptsA[ptsA.length - 1] ?? null
-  const leadB = ptsB[ptsB.length - 1] ?? null
-  const chgFor = (rev: { t: number; price: number }[]) => {
-    if (rev.length < 2) return null
-    const first = rev[0].price
-    const last = rev[rev.length - 1].price
-    return {
-      rawChange: last - first,
-      percentChange: first > 0 ? ((last - first) / first) * 100 : 0,
-    }
-  }
-
-  // Leading-edge marker = the artist's profile picture (clipped to a circle)
-  // ringed with a thin stroke in the line colour. Falls back to a dot if the
-  // image is missing.
-  const renderLead = (
-    lead: CmpPt | null,
-    ptsLen: number,
-    color: string,
-    image: string | null | undefined,
-    key: string,
-  ) => {
-    if (!lead || ptsLen < 2) return null
-    if (!image) return <circle key={key} cx={lead.x} cy={lead.y} r="3.5" fill={color} />
-    // Pin the circle's centre-left (9 o'clock) to the line's endpoint: shift the
-    // whole marker right by its radius so the line attaches at the left edge.
-    const cx = lead.x + LEAD_R
-    const cy = lead.y
-    const clipId = `${uid}-${key}`
-    return (
-      <g key={key}>
-        <clipPath id={clipId}>
-          <circle cx={cx} cy={cy} r={LEAD_R} />
-        </clipPath>
-        <image
-          href={image}
-          x={cx - LEAD_R}
-          y={cy - LEAD_R}
-          width={LEAD_R * 2}
-          height={LEAD_R * 2}
-          clipPath={`url(#${clipId})`}
-          preserveAspectRatio="xMidYMid slice"
-        />
-        <circle cx={cx} cy={cy} r={LEAD_R} fill="none" stroke={color} strokeWidth={2.5} />
-        <text
-          x={cx + LEAD_R + 5}
-          y={cy}
-          textAnchor="start"
-          dominantBaseline="central"
-          fontSize={13}
-          fontWeight={700}
-          fontFamily={FONT}
-          fill={WHITE}
-          stroke={BG}
-          strokeWidth={4}
-          strokeLinejoin="round"
-          paintOrder="stroke"
-        >
-          {lead.price.toFixed(1)}
-        </text>
-      </g>
-    )
-  }
+  }, [loopMs])
 
   return (
     <div style={{ width: '100%', maxWidth: 760, height: '100%', display: 'flex', flexDirection: 'column' }}>
-      {/* One header per artist (second one only when a 2nd artist is selected) */}
       <div style={{ display: 'flex', gap: 24, justifyContent: 'center' }}>
         <div style={{ flex: artistB ? '1 1 0' : '0 1 auto', minWidth: 0 }}>
           <ChartArtistHeader
             artist={artistA}
-            drawingPrice={leadA ? leadA.price : null}
+            drawingPrice={head.aP}
             fallbackPrice={artistA?.index_price ?? 0}
-            changeData={chgFor(revA)}
+            changeData={head.aC}
             chartColor={colorA}
             valuePrefix=""
             valueUnit="pts"
@@ -1195,9 +1280,9 @@ function CompareChart({
           <div style={{ flex: '1 1 0', minWidth: 0 }}>
             <ChartArtistHeader
               artist={artistB}
-              drawingPrice={leadB ? leadB.price : null}
+              drawingPrice={head.bP}
               fallbackPrice={artistB?.index_price ?? 0}
-              changeData={chgFor(revB)}
+              changeData={head.bC}
               chartColor={colorB}
               valuePrefix=""
               valueUnit="pts"
@@ -1205,109 +1290,13 @@ function CompareChart({
           </div>
         )}
       </div>
-
-      {/* Shared chart: both lines overlaid on one growing, rescaling axis */}
-      <div ref={chartBoxRef} style={{ width: '100%', flex: 1, minHeight: 0, position: 'relative' }}>
-        {gridLines.map((price) => {
-          const gy = PAD_T + (1 - (price - loP) / vRange) * chartAreaH
-          return (
-            <div key={price} style={{ position: 'absolute', top: gy, left: 0, right: 0, pointerEvents: 'none' }}>
-              <div
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  right: AXIS_YW,
-                  height: 1,
-                  backgroundColor: AXIS_GRID_SOFT,
-                }}
-              />
-              <div
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  right: 2,
-                  transform: 'translateY(-50%)',
-                  fontSize: 10,
-                  fontFamily: 'var(--font-geist-sans)',
-                  color: AXIS_MUTED,
-                  whiteSpace: 'nowrap',
-                  lineHeight: 1,
-                }}
-              >
-                {price.toFixed(2)}
-              </div>
-            </div>
-          )
-        })}
-        {/* Fixed bottom axis — always present; only the gridlines above vary */}
-        <div
-          style={{
-            position: 'absolute',
-            top: PAD_T + chartAreaH,
-            left: 0,
-            right: AXIS_YW,
-            height: 1,
-            backgroundColor: AXIS_GRID,
-            pointerEvents: 'none',
-          }}
-        />
-        {/* Fixed left axis (y-axis baseline) — always present */}
-        <div
-          style={{
-            position: 'absolute',
-            top: PAD_T,
-            left: 0,
-            width: 1,
-            height: chartAreaH,
-            backgroundColor: AXIS_GRID,
-            pointerEvents: 'none',
-          }}
-        />
-        <svg width="100%" height={H} style={{ display: 'block', overflow: 'visible' }}>
-          {pathA && ptsA.length >= 2 && (
-            <path
-              d={pathA}
-              fill="none"
-              stroke={colorA}
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          )}
-          {pathB && ptsB.length >= 2 && (
-            <path
-              d={pathB}
-              fill="none"
-              stroke={colorB}
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          )}
-          {renderLead(leadA, ptsA.length, colorA, artistA?.image_url, 'a')}
-          {renderLead(leadB, ptsB.length, colorB, artistB?.image_url, 'b')}
-        </svg>
-
-        {/* X-axis: one label per visible calendar year, centred on its span */}
-        {yearTicks.map(({ year, left }) => {
-          const transform =
-            left <= 8 ? 'translateX(0)' : left >= 92 ? 'translateX(-100%)' : 'translateX(-50%)'
-          return (
-            <div
-              key={year}
-              style={{ position: 'absolute', bottom: 6, left: `${left}%`, transform, pointerEvents: 'none' }}
-            >
-              <span style={{ fontSize: 10, color: AXIS_MUTED, fontFamily: 'var(--font-geist-sans)' }}>
-                {year}
-              </span>
-            </div>
-          )
-        })}
+      <div ref={containerRef} style={{ width: '100%', flex: 1, minHeight: 0, position: 'relative' }}>
+        <canvas ref={canvasRef} style={{ display: 'block', width: '100%', height: '100%' }} />
       </div>
     </div>
   )
 }
+
 
 // ---- Small styled controls for the comparison tool ----
 const CONTROL_INPUT_STYLE: React.CSSProperties = {
@@ -1476,7 +1465,7 @@ export default function LandingAnimations() {
   const [selectedBId, setSelectedBId] = useState<string | null | undefined>(undefined)
   const [rangeStart, setRangeStart] = useState<number | null>(null)
   const [rangeEnd, setRangeEnd] = useState<number | null>(null)
-  const [loopSeconds, setLoopSeconds] = useState(8) // full-loop target duration
+  const [loopSeconds, setLoopSeconds] = useState(35) // full-loop target duration
 
   // Defaults once the snapshot loads: first two artists, full date range.
   // (undefined = not yet initialised; null for artist B = user picked "None".)
