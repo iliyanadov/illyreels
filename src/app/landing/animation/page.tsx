@@ -652,7 +652,7 @@ function ChartArtistHeader({
   // Compressed sizes for the fixed-canvas layout (the tape steals vertical room,
   // so the header tightens to keep the chart its size).
   const sz = compact
-    ? { gap: 8, mb: 8, avatar: 44, nameGap: 5, name: 20, value: 28, unit: 16, chg: 13 }
+    ? { gap: 6, mb: 5, avatar: 32, nameGap: 3, name: 15, value: 22, unit: 12, chg: 10 }
     : { gap: 16, mb: 24, avatar: 64, nameGap: 10, name: 28, value: 40, unit: 24, chg: 16 }
   return (
     <div
@@ -2233,6 +2233,11 @@ export default function LandingAnimations() {
                     flex: 1,
                     minHeight: 0,
                     padding: 32,
+                    // reserve the 320px safe-zone bottom margin (less the 80px the
+                    // content is shifted up) so the artist section ends at the
+                    // safe-zone bottom (~1600). The artists are shrunk by the same
+                    // amount so the chart's flex size is unchanged.
+                    paddingBottom: ((REELS_SAFE.bottom - 80) * CANVAS_BASE_W) / CANVAS_DESIGN_W,
                     boxSizing: 'border-box',
                     display: 'flex',
                     flexDirection: 'column',
