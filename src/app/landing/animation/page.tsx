@@ -556,7 +556,7 @@ function Tile({
   aspect,
   maxWidth,
 }: {
-  title: string
+  title?: string
   children: React.ReactNode
   aspect?: string
   maxWidth?: number
@@ -586,17 +586,19 @@ function Tile({
           : {}),
       }}
     >
-      <span
-        style={{
-          fontSize: 12,
-          textTransform: 'uppercase',
-          letterSpacing: '0.15em',
-          color: SEC,
-          fontFamily: FONT,
-        }}
-      >
-        {title}
-      </span>
+      {title && (
+        <span
+          style={{
+            fontSize: 12,
+            textTransform: 'uppercase',
+            letterSpacing: '0.15em',
+            color: SEC,
+            fontFamily: FONT,
+          }}
+        >
+          {title}
+        </span>
+      )}
       <div
         style={{
           display: 'flex',
@@ -1827,9 +1829,9 @@ export default function LandingAnimations() {
   const combinedA = useMemo(() => buildCombined(wikiA, trendsA), [wikiA, trendsA])
   const combinedB = useMemo(() => buildCombined(wikiB, trendsB), [wikiB, trendsB])
   const sourceOptions = {
-    wikipedia: { a: wikiA, b: wikiB, title: 'Wikipedia pageviews (daily)' },
-    combined: { a: combinedA, b: combinedB, title: 'Combined (Wikipedia + Trends)' },
-    trends: { a: trendsA, b: trendsB, title: 'Google Trends (monthly)' },
+    wikipedia: { a: wikiA, b: wikiB },
+    combined: { a: combinedA, b: combinedB },
+    trends: { a: trendsA, b: trendsB },
   }
   const current = sourceOptions[source]
   const chartData = artist?.data_points ?? mockData
@@ -1988,7 +1990,7 @@ export default function LandingAnimations() {
                   { value: 'trends', label: 'Google Trends' },
                 ]}
               />
-              <Tile title={current.title} aspect="9 / 16" maxWidth={440}>
+              <Tile aspect="9 / 16" maxWidth={440}>
                 <CompareChart
                   artistA={current.a}
                   artistB={current.b}
