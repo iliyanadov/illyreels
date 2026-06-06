@@ -1489,6 +1489,16 @@ function CompareChart({
           {banner}
         </div>
       )}
+      {/* chart + artists: shifted up 20px (of the 1080 design) below the banner */}
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          transform: `translateY(${(-20 * CANVAS_BASE_W) / CANVAS_DESIGN_W}px)`,
+        }}
+      >
       <div
         ref={containerRef}
         style={{
@@ -1531,6 +1541,7 @@ function CompareChart({
             />
           </div>
         )}
+      </div>
       </div>
     </div>
   )
