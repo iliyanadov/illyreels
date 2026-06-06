@@ -1484,6 +1484,11 @@ function CompareChart({
 
   return (
     <div style={{ width: '100%', maxWidth: 760, height: '100%', display: 'flex', flexDirection: 'column' }}>
+      {banner && (
+        <div style={{ display: 'flex', justifyContent: 'center', flexShrink: 0, padding: '6px 0' }}>
+          {banner}
+        </div>
+      )}
       <div
         ref={containerRef}
         style={{
@@ -1499,11 +1504,6 @@ function CompareChart({
       >
         <canvas ref={canvasRef} style={{ display: 'block', width: '100%', height: '100%' }} />
       </div>
-      {banner && (
-        <div style={{ display: 'flex', justifyContent: 'center', flexShrink: 0, padding: '6px 0' }}>
-          {banner}
-        </div>
-      )}
       <div style={{ display: 'flex', gap: compact ? 16 : 24, justifyContent: 'center' }}>
         <div style={{ flex: artistB ? '1 1 0' : '0 1 auto', minWidth: 0 }}>
           <ChartArtistHeader
@@ -2215,7 +2215,8 @@ export default function LandingAnimations() {
                 >
                   <TapeTitle />
                 </div>
-                {/* Chart area — remaining 84.375%, padded. */}
+                {/* Chart area — remaining space below the tape, padded. Shifted
+                    up 60px (of the 1080 design) as a uniform rigid move. */}
                 <div
                   style={{
                     flex: 1,
@@ -2224,6 +2225,7 @@ export default function LandingAnimations() {
                     boxSizing: 'border-box',
                     display: 'flex',
                     flexDirection: 'column',
+                    transform: `translateY(${(-60 * CANVAS_BASE_W) / CANVAS_DESIGN_W}px)`,
                   }}
                 >
                   <CompareChart
