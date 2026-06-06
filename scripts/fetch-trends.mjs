@@ -1,12 +1,31 @@
 // One-time fetcher: Google Trends "interest over time" for the artist roster,
-// via SerpApi, anchor-normalised to a single shared 0..100 scale, written to
-// public/trends-data.json. The web app reads that static file at runtime, so
-// SerpApi is only ever hit when you run this script (not per page view).
+// via SerpApi, written to public/trends-data.json. The web app reads that static
+// file at runtime, so SerpApi is only ever hit when you run this script (not per
+// page view).
 //
 //   1. Put SERPAPI_KEY in .env.local (or pass it inline)
 //   2. node scripts/fetch-trends.mjs        (or: npm run fetch-trends)
 //
-// Cost: one SerpApi search per batch of <=5 terms. 16 artists -> ~4 searches.
+// ── Standardization (control-term method) ────────────────────────────────────
+// A single Google Trends query is scaled 0..100 relative to its own peak, so two
+// separate queries are NOT comparable. To make every artist comparable on one
+// time-stable scale, each artist is queried ALONGSIDE four medical control terms
+// whose true search volume is roughly constant across time and regions. Dividing
+// the artist by the control baseline cancels the per-query scale factor, leaving
+// a value proportional to true volume relative to that fixed medical baseline —
+// comparable across artists and stable over time.
+//
+//   baseline_t   = mean(control terms' interest at month t)
+//   standardized = ln(1 + artist_t / (baseline_t + 1))
+//
+// The ln(1 + …) compresses the dynamic range and stays ≥ 0 / defined even when
+// interest is ~0 (this is steps 2 + 3 of the spec as written; the worked example
+// just dropped the final +1, i.e. ln(17.5) vs ln(18.5) — the +1 matters only for
+// near-zero artists). Finally every artist is scaled by ONE global factor so the
+// roster peak reads 100 (a display scale that preserves cross-artist ratios).
+//
+// Cost: one SerpApi search per artist (artist + 4 controls = 5 terms, the max).
+// 16 artists -> ~16 searches, run once.
 
 import { writeFile, readFile, mkdir } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
@@ -22,12 +41,15 @@ const DATE_RANGE = 'all'
 const GEO = '' // '' = worldwide
 const INDEX_BACKEND = 'https://indextrading-production.up.railway.app'
 const SERP_ENDPOINT = 'https://serpapi.com/search.json'
-const BATCH_OTHERS = 4 // + 1 anchor = 5 terms max per request
+
+// Stable, low-volatility control terms. Their (roughly constant) search volume is
+// the fixed yardstick that makes separate artist queries comparable. Keep at four
+// so each query is artist + 4 controls = 5 terms (Google Trends' per-query max).
+const CONTROL_TERMS = ['ankle sprain', 'wrist pain', 'broken bone', 'blurry vision']
 
 // Roster: spotify id (for name + avatar lookup) and the Trends search query.
-// The anchor must be a high-search-volume artist present in every batch.
 const ROSTER = [
-  { id: '3TVXtAsR1Inumwj472S9r4', query: 'Drake', anchor: true },
+  { id: '3TVXtAsR1Inumwj472S9r4', query: 'Drake' },
   { id: '5K4W6rqBFWDnAN6FQUkS6x', query: 'Kanye West' },
   { id: '2YZyLoL8N0Wb9xBt1NhZWg', query: 'Kendrick Lamar' },
   { id: '7tYKF4w9nC0nq9CsPZTHyP', query: 'SZA' },
@@ -72,6 +94,8 @@ async function fetchArtistMeta(id) {
   }
 }
 
+// One SerpApi google_trends TIMESERIES call for [artist, ...controls]. Returns
+// the month timestamps (ms) and one value array per query term, in query order.
 async function fetchTrendsBatch(queries, apiKey) {
   const url = new URL(SERP_ENDPOINT)
   url.searchParams.set('engine', 'google_trends')
@@ -102,6 +126,16 @@ async function fetchTrendsBatch(queries, apiKey) {
   return { ts, series }
 }
 
+// Standardize one artist against its control terms, month by month.
+function standardize(series) {
+  const artist = series[0]
+  const controls = series.slice(1)
+  return artist.map((a, t) => {
+    const baseline = mean(controls.map((c) => c[t] ?? 0))
+    return Math.log(1 + a / (baseline + 1))
+  })
+}
+
 // ---- main -------------------------------------------------------------------
 async function main() {
   const apiKey = await resolveApiKey()
@@ -110,36 +144,22 @@ async function main() {
     process.exit(1)
   }
 
-  const anchor = ROSTER.find((r) => r.anchor) || ROSTER[0]
-  const others = ROSTER.filter((r) => r !== anchor)
-  const batches = []
-  for (let i = 0; i < others.length; i += BATCH_OTHERS) {
-    batches.push(others.slice(i, i + BATCH_OTHERS))
+  const byId = {} // id -> { ts, vals (standardized) }
+
+  for (let i = 0; i < ROSTER.length; i++) {
+    const r = ROSTER[i]
+    const queries = [r.query, ...CONTROL_TERMS]
+    console.log(`[trends] ${i + 1}/${ROSTER.length}: ${r.query} (vs ${CONTROL_TERMS.length} controls)`)
+    try {
+      const { ts, series } = await fetchTrendsBatch(queries, apiKey)
+      byId[r.id] = { ts, vals: standardize(series) }
+    } catch (e) {
+      console.warn(`[trends] ${r.query} failed: ${e?.message || e}`)
+    }
+    if (i < ROSTER.length - 1) await sleep(1200) // be gentle on rate limits
   }
 
-  const byId = {} // id -> { ts, vals }
-  let canonicalAnchorAvg = null
-
-  for (let b = 0; b < batches.length; b++) {
-    const group = [anchor, ...batches[b]]
-    const queries = group.map((g) => g.query)
-    console.log(`[trends] batch ${b + 1}/${batches.length}: ${queries.join(', ')}`)
-    const { ts, series } = await fetchTrendsBatch(queries, apiKey)
-
-    const anchorAvg = mean(series[0]) || 1
-    if (canonicalAnchorAvg == null) {
-      canonicalAnchorAvg = anchorAvg
-      byId[anchor.id] = { ts, vals: series[0] } // canonical anchor (batch 1)
-    }
-    const factor = canonicalAnchorAvg / anchorAvg // align this batch to batch 1
-    for (let i = 1; i < group.length; i++) {
-      byId[group[i].id] = { ts, vals: series[i].map((v) => v * factor) }
-    }
-
-    if (b < batches.length - 1) await sleep(1200) // be gentle on rate limits
-  }
-
-  // Renormalise so the global peak across all artists is 100.
+  // One global scale so the roster peak reads 100 (preserves cross-artist ratios).
   let globalMax = 0
   for (const id in byId) for (const v of byId[id].vals) if (v > globalMax) globalMax = v
   const norm = globalMax > 0 ? 100 / globalMax : 1
