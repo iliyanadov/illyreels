@@ -622,6 +622,7 @@ function ChartArtistHeader({
   chartColor,
   valuePrefix = '$',
   valueUnit = 'pts',
+  compact = false,
 }: {
   artist: ArtistData | null
   drawingPrice: number | null
@@ -630,29 +631,35 @@ function ChartArtistHeader({
   chartColor: string
   valuePrefix?: string
   valueUnit?: string
+  compact?: boolean
 }) {
   const name = artist?.name ?? 'Loading…'
   const imageUrl = artist?.image_url
+  // Compressed sizes for the fixed-canvas layout (the tape steals vertical room,
+  // so the header tightens to keep the chart its size).
+  const sz = compact
+    ? { gap: 8, mb: 8, avatar: 44, nameGap: 5, name: 20, value: 28, unit: 16, chg: 13 }
+    : { gap: 16, mb: 24, avatar: 64, nameGap: 10, name: 28, value: 40, unit: 24, chg: 16 }
   return (
     <div
       style={{
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        gap: 16,
-        marginBottom: 24,
+        gap: sz.gap,
+        marginBottom: sz.mb,
         textAlign: 'center',
       }}
     >
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: sz.nameGap }}>
         {imageUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={imageUrl}
             alt={name}
             style={{
-              width: 64,
-              height: 64,
+              width: sz.avatar,
+              height: sz.avatar,
               flexShrink: 0,
               borderRadius: '50%',
               objectFit: 'cover',
@@ -662,8 +669,8 @@ function ChartArtistHeader({
         ) : (
           <div
             style={{
-              width: 64,
-              height: 64,
+              width: sz.avatar,
+              height: sz.avatar,
               flexShrink: 0,
               borderRadius: '50%',
               backgroundColor: BORDER,
@@ -673,7 +680,7 @@ function ChartArtistHeader({
         <h2
           style={{
             margin: 0,
-            fontSize: 28,
+            fontSize: sz.name,
             fontWeight: 300,
             color: WHITE,
             fontFamily: FONT,
@@ -698,7 +705,7 @@ function ChartArtistHeader({
       >
         <span
           style={{
-            fontSize: 40,
+            fontSize: sz.value,
             fontWeight: 600,
             color: WHITE,
             fontFamily: FONT,
@@ -717,7 +724,7 @@ function ChartArtistHeader({
         </span>
         <span
           style={{
-            fontSize: 24,
+            fontSize: sz.unit,
             fontWeight: 300,
             color: WHITE,
             fontFamily: FONT,
@@ -736,8 +743,8 @@ function ChartArtistHeader({
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
               <svg
-                width="16"
-                height="16"
+                width={sz.chg}
+                height={sz.chg}
                 viewBox="0 0 24 18"
                 fill="none"
                 style={{
@@ -750,7 +757,7 @@ function ChartArtistHeader({
               <span
                 style={{
                   color: chartColor,
-                  fontSize: 16,
+                  fontSize: sz.chg,
                   fontFamily: FONT,
                   display: 'inline-block',
                   minWidth: '4em',
@@ -770,7 +777,7 @@ function ChartArtistHeader({
             <span
               style={{
                 color: chartColor,
-                fontSize: 16,
+                fontSize: sz.chg,
                 fontFamily: FONT,
                 display: 'inline-block',
                 minWidth: '4em',
@@ -1313,6 +1320,7 @@ function CompareChart({
   loopMs = 8200,
   normalised = false,
   smoothing = 0,
+  compact = false,
 }: {
   artistA: ArtistData | null
   artistB: ArtistData | null
@@ -1322,6 +1330,7 @@ function CompareChart({
   loopMs?: number
   normalised?: boolean
   smoothing?: number
+  compact?: boolean
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -1454,7 +1463,7 @@ function CompareChart({
 
   return (
     <div style={{ width: '100%', maxWidth: 760, height: '100%', display: 'flex', flexDirection: 'column' }}>
-      <div style={{ display: 'flex', gap: 24, justifyContent: 'center' }}>
+      <div style={{ display: 'flex', gap: compact ? 16 : 24, justifyContent: 'center' }}>
         <div style={{ flex: artistB ? '1 1 0' : '0 1 auto', minWidth: 0 }}>
           <ChartArtistHeader
             artist={artistA}
@@ -1464,6 +1473,7 @@ function CompareChart({
             chartColor={colorA}
             valuePrefix=""
             valueUnit="pts"
+            compact={compact}
           />
         </div>
         {artistB && (
@@ -1476,6 +1486,7 @@ function CompareChart({
               chartColor={colorB}
               valuePrefix=""
               valueUnit="pts"
+              compact={compact}
             />
           </div>
         )}
@@ -1803,6 +1814,7 @@ export default function LandingAnimations() {
   const [normalised, setNormalised] = useState(false) // min–max each series to 0–100
   const [smoothing, setSmoothing] = useState(0) // 0–100 moving-average strength
   const [source, setSource] = useState<'wikipedia' | 'combined' | 'trends'>('combined')
+  const [tapeText, setTapeText] = useState('')
 
   // Defaults once the snapshot loads: Drake vs Kendrick Lamar, full date range.
   // (undefined = not yet initialised; null for artist B = user picked "None".)
@@ -1990,17 +2002,78 @@ export default function LandingAnimations() {
                   { value: 'trends', label: 'Google Trends' },
                 ]}
               />
-              <Tile aspect="9 / 16" maxWidth={440}>
-                <CompareChart
-                  artistA={current.a}
-                  artistB={current.b}
-                  windowStart={rangeStart ?? undefined}
-                  windowEnd={rangeEnd ?? undefined}
-                  loopMs={Math.max(loopSeconds, 1) * 1000}
-                  normalised={normalised}
-                  smoothing={smoothing}
-                />
-              </Tile>
+              {/* Fixed 1080x1920 canvas: white tape (300px) at the top, chart
+                  below. The artist header is compressed so the chart keeps its
+                  size within the fixed canvas. */}
+              <div
+                style={{
+                  width: '100%',
+                  maxWidth: 440,
+                  aspectRatio: '1080 / 1920',
+                  border: `2px solid ${WHITE}`,
+                  boxSizing: 'border-box',
+                  background: BG,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  margin: '0 auto',
+                }}
+              >
+                {/* White title tape — 1080x300 band (15.625% of the canvas),
+                    full-bleed, with centred editable black Geist text. */}
+                <div
+                  style={{
+                    width: '100%',
+                    height: '15.625%',
+                    flexShrink: 0,
+                    background: WHITE,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    containerType: 'inline-size',
+                  }}
+                >
+                  <input
+                    type="text"
+                    value={tapeText}
+                    onChange={(e) => setTapeText(e.target.value)}
+                    placeholder="Type a title…"
+                    style={{
+                      width: '92%',
+                      border: 'none',
+                      outline: 'none',
+                      background: 'transparent',
+                      textAlign: 'center',
+                      color: '#000000',
+                      fontFamily: 'var(--font-geist-sans)',
+                      fontWeight: 600,
+                      fontSize: 'clamp(14px, 7cqw, 96px)',
+                      padding: 0,
+                    }}
+                  />
+                </div>
+                {/* Chart area — remaining 84.375%, padded. */}
+                <div
+                  style={{
+                    flex: 1,
+                    minHeight: 0,
+                    padding: 32,
+                    boxSizing: 'border-box',
+                    display: 'flex',
+                    flexDirection: 'column',
+                  }}
+                >
+                  <CompareChart
+                    artistA={current.a}
+                    artistB={current.b}
+                    windowStart={rangeStart ?? undefined}
+                    windowEnd={rangeEnd ?? undefined}
+                    loopMs={Math.max(loopSeconds, 1) * 1000}
+                    normalised={normalised}
+                    smoothing={smoothing}
+                    compact
+                  />
+                </div>
+              </div>
             </div>
           </div>
         </div>
