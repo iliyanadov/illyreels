@@ -154,14 +154,18 @@ const DEFAULT_B_ID = '2YZyLoL8N0Wb9xBt1NhZWg' // Kendrick Lamar
 const SMOOTH_MAX_FRAC = 0.08
 
 // Render the reel canvas from its 1080x1920 design: lay it out at CANVAS_BASE_W
-// — where every size is tuned — then CSS-scale to CANVAS_OUT_W so proportions are
-// identical, and bump the chart canvas pixel ratio to match. CANVAS_PREVIEW
-// scales the on-screen size (0.5 = show the 1080 design at 50% → 540x960).
+// — where every size is tuned — then apply ONE uniform CSS transform to the whole
+// frame. So downscaling is a pure zoom: every element (HTML and the chart canvas)
+// keeps EXACTLY the same relative size and place at any CANVAS_PREVIEW. The chart
+// canvas always renders at the fixed design resolution (CANVAS_RENDER_SCALE, NOT
+// the display scale) so its pixels are identical too — it's just zoomed like the
+// rest. CANVAS_PREVIEW only changes the on-screen size (0.5 = 540x960).
 const CANVAS_BASE_W = 440
 const CANVAS_DESIGN_W = 1080 // the 1080x1920 design space
 const CANVAS_PREVIEW = 0.5 // display the design at 50%
 const CANVAS_OUT_W = CANVAS_DESIGN_W * CANVAS_PREVIEW // 540
-const CANVAS_SCALE = CANVAS_OUT_W / CANVAS_BASE_W
+const CANVAS_SCALE = CANVAS_OUT_W / CANVAS_BASE_W // display transform (PREVIEW-dependent)
+const CANVAS_RENDER_SCALE = CANVAS_DESIGN_W / CANVAS_BASE_W // canvas pixel density (constant)
 
 function formatAxisDate(ms: number): string {
   const d = new Date(ms)
@@ -2162,7 +2166,7 @@ export default function LandingAnimations() {
                         }}
                       />
                     }
-                    pixelScale={CANVAS_SCALE}
+                    pixelScale={CANVAS_RENDER_SCALE}
                   />
                 </div>
               </div>
