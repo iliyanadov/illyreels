@@ -723,7 +723,7 @@ function ChartArtistHeader({
             transition: 'color 0.6s ease',
             display: 'inline-block',
             minWidth: '3.5em',
-            textAlign: 'center',
+            textAlign: 'right',
           }}
         >
           <NumberFlow
