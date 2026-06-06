@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
+    "fetch-pageviews": "node scripts/fetch-wikipedia.mjs",
     "fetch-trends": "node scripts/fetch-trends.mjs",
     "build": "next build",
     "start": "next start",

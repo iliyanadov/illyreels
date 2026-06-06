@@ -59,6 +59,7 @@ interface DataPoint {
   timestamp: string
 }
 interface ArtistData {
+  id?: string
   name: string
   data_points: DataPoint[]
   image_url?: string | null
@@ -67,40 +68,60 @@ interface ArtistData {
 }
 
 function useHeroArtists() {
-  const [artists, setArtists] = useState<ArtistData[]>([])
+  // Two pre-fetched snapshots: Wikipedia pageviews (daily) and Google Trends
+  // (monthly). Both are read as static files — zero data API calls at runtime.
+  const [artists, setArtists] = useState<ArtistData[]>([]) // wiki
+  const [trends, setTrends] = useState<ArtistData[]>([])
   const [loaded, setLoaded] = useState(false)
 
   useEffect(() => {
     let cancelled = false
 
-    // Non-deterministic shuffle so the chart picks a random pair each load.
-    const shuffle = (list: ArtistData[]) => {
-      for (let i = list.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1))
-        const tmp = list[i]
-        list[i] = list[j]
-        list[j] = tmp
+    // Stable alphabetical order so the artist dropdowns are consistent.
+    const sortByName = (list: ArtistData[]) =>
+      list.sort((a, b) => a.name.localeCompare(b.name))
+
+    const DAY = 86400000
+    // Expand the compact snapshot ({ start, values[] }) into data_points. The
+    // Wikipedia file stores daily values from a common start date to keep ~11
+    // years small; the Trends file is already in data_points form.
+    type CompactArtist = ArtistData & { start?: string; values?: number[] }
+    const expand = (a: CompactArtist): ArtistData => {
+      if (Array.isArray(a.data_points)) return a
+      if (a.start && Array.isArray(a.values)) {
+        const t0 = new Date(`${a.start}T00:00:00Z`).getTime()
+        const data_points: DataPoint[] = a.values.map((v, i) => ({
+          timestamp: new Date(t0 + i * DAY).toISOString().slice(0, 10),
+          index: v,
+        }))
+        return { id: a.id, name: a.name, image_url: a.image_url, index_price: a.index_price, data_points }
       }
-      return list
+      return { ...a, data_points: [] }
     }
 
-    // Data source: the pre-fetched Google Trends snapshot at
-    // public/trends-data.json (produced by `npm run fetch-trends`). The chart no
-    // longer calls the Sonotrade/index API — name, avatar and series are all
-    // baked into the snapshot, so there are zero data API calls at runtime.
-    ;(async () => {
-      let list: ArtistData[] = []
+    const load = async (url: string): Promise<ArtistData[]> => {
       try {
-        const res = await fetch('/trends-data.json', { cache: 'force-cache' })
+        const res = await fetch(url, { cache: 'force-cache' })
         if (res.ok) {
           const data = await res.json()
-          if (Array.isArray(data) && data.length) list = data as ArtistData[]
+          if (Array.isArray(data) && data.length) {
+            return sortByName((data as CompactArtist[]).map(expand))
+          }
         }
       } catch {
-        // snapshot missing — leave the gallery empty until it's regenerated
+        // snapshot missing — return empty
       }
+      return []
+    }
+
+    ;(async () => {
+      const [wiki, gt] = await Promise.all([
+        load('/artist-data.json'), // Wikipedia pageviews (daily)
+        load('/trends-data.json'), // Google Trends (monthly)
+      ])
       if (cancelled) return
-      setArtists(shuffle(list))
+      setArtists(wiki)
+      setTrends(gt)
       setLoaded(true)
     })()
 
@@ -109,7 +130,7 @@ function useHeroArtists() {
     }
   }, [])
 
-  return { artists, loaded }
+  return { artists, trends, loaded }
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -743,17 +764,36 @@ function ChartArtistHeader({
 
 type CmpPt = { x: number; y: number; price: number }
 
-// Windowed + downsampled price series for one artist
-function compareSeries(data: DataPoint[] | undefined, windowMs?: number) {
+// Time extent [min, max] (ms) of an artist's raw data, for clamping the window.
+function seriesExtent(data: DataPoint[] | undefined): [number, number] | null {
+  if (!data || !data.length) return null
+  let lo = Infinity
+  let hi = -Infinity
+  for (const p of data) {
+    const t = new Date(p.timestamp).getTime()
+    if (!isNaN(t)) {
+      if (t < lo) lo = t
+      if (t > hi) hi = t
+    }
+  }
+  return lo <= hi ? [lo, hi] : null
+}
+
+// Price series for one artist, clipped to an absolute [start, end] window
+// BEFORE downsampling, so daily detail is preserved within whatever range is
+// selected (rather than downsampling the whole history first and losing it).
+function compareSeries(
+  data: DataPoint[] | undefined,
+  range?: { start: number; end: number },
+) {
   if (!data) return [] as { t: number; price: number }[]
   let pts = data
     .map((p) => ({ t: new Date(p.timestamp).getTime(), price: parseFloat(String(p.index)) }))
     .filter((p) => !isNaN(p.t) && !isNaN(p.price))
     .sort((a, b) => a.t - b.t)
-  if (windowMs && pts.length >= 2) {
-    const cutoff = Date.now() - windowMs
-    const win = pts.filter((p) => p.t >= cutoff)
-    if (win.length >= 2) pts = win
+  if (range) {
+    const win = pts.filter((p) => p.t >= range.start && p.t <= range.end)
+    pts = win
   }
   if (pts.length > 200) {
     const step = (pts.length - 1) / 199
@@ -884,12 +924,16 @@ function CompareChart({
   artistA,
   artistB,
   height: heightProp = 620,
-  windowMs,
+  windowStart,
+  windowEnd,
+  loopMs = 8200,
 }: {
   artistA: ArtistData | null
   artistB: ArtistData | null
   height?: number
-  windowMs?: number
+  windowStart?: number
+  windowEnd?: number
+  loopMs?: number
 }) {
   const chartBoxRef = useRef<HTMLDivElement>(null)
   const uid = useId() // unique clip-path ids for the leading-edge avatars
@@ -916,36 +960,52 @@ function CompareChart({
     return () => ro.disconnect()
   }, [])
 
-  // 18-month data pool per artist; the replay reveals progressively within it.
-  const sA = useMemo(() => compareSeries(artistA?.data_points, windowMs), [artistA, windowMs])
-  const sB = useMemo(() => compareSeries(artistB?.data_points, windowMs), [artistB, windowMs])
-
-  // Replay time domain: earliest point across both -> latest across both.
-  const tStart = useMemo(() => {
+  // Extent of the available data across the selected artist(s) (from raw data,
+  // before any downsampling — so clamping the window is exact).
+  const extentA = useMemo(() => seriesExtent(artistA?.data_points), [artistA])
+  const extentB = useMemo(() => seriesExtent(artistB?.data_points), [artistB])
+  const dataMin = useMemo(() => {
     const f: number[] = []
-    if (sA.length) f.push(sA[0].t)
-    if (sB.length) f.push(sB[0].t)
+    if (extentA) f.push(extentA[0])
+    if (extentB) f.push(extentB[0])
     return f.length ? Math.min(...f) : 0
-  }, [sA, sB])
-  const tEnd = useMemo(() => {
+  }, [extentA, extentB])
+  const dataMax = useMemo(() => {
     const l: number[] = []
-    if (sA.length) l.push(sA[sA.length - 1].t)
-    if (sB.length) l.push(sB[sB.length - 1].t)
+    if (extentA) l.push(extentA[1])
+    if (extentB) l.push(extentB[1])
     return l.length ? Math.max(...l) : 1
-  }, [sA, sB])
+  }, [extentA, extentB])
 
-  // Looping cursor: grow the window over GROW ms, hold at full, reset, repeat.
-  const dataKey = `${artistA?.name ?? ''}|${artistB?.name ?? ''}|${sA.length}|${sB.length}`
+  // Selected window, clamped to the available data (falls back to full extent).
+  const tStart = Math.min(Math.max(windowStart ?? dataMin, dataMin), dataMax)
+  const tEndClamped = Math.max(Math.min(windowEnd ?? dataMax, dataMax), dataMin)
+  const tEnd = tEndClamped > tStart ? tEndClamped : dataMax
+
+  // Series filtered to the window FIRST, then downsampled — preserves daily
+  // detail inside whatever range is selected. The replay reveals within it.
+  const sA = useMemo(
+    () => compareSeries(artistA?.data_points, { start: tStart, end: tEnd }),
+    [artistA, tStart, tEnd],
+  )
+  const sB = useMemo(
+    () => compareSeries(artistB?.data_points, { start: tStart, end: tEnd }),
+    [artistB, tStart, tEnd],
+  )
+
+  // Looping cursor: grow the window, hold briefly at full, reset, repeat. The
+  // total loop time is `loopMs` (user-controlled), split ~85% growth / 15% hold.
+  // Re-keyed on the window + loopMs so changing artists/dates/speed restarts it.
+  const dataKey = `${artistA?.name ?? ''}|${artistB?.name ?? ''}|${tStart}|${tEnd}|${sA.length}|${sB.length}`
   useEffect(() => {
     if (sA.length < 2 && sB.length < 2) return
     if (rafRef.current) cancelAnimationFrame(rafRef.current)
     startRef.current = performance.now()
-    const GROW = 7000 // ~18 months of growth
-    const HOLD = 1200 // pause on the full view before looping back
-    const CYCLE = GROW + HOLD
+    const CYCLE = Math.max(loopMs, 1000) // total loop duration
+    const GROW = CYCLE * 0.85 // growth phase
     const animate = (now: number) => {
       const phase = (now - startRef.current) % CYCLE
-      setCursorT(Math.min(phase / GROW, 1))
+      setCursorT(Math.min(phase / GROW, 1)) // holds at 1 during the final ~15%
       rafRef.current = requestAnimationFrame(animate)
     }
     rafRef.current = requestAnimationFrame(animate)
@@ -953,7 +1013,7 @@ function CompareChart({
       if (rafRef.current) cancelAnimationFrame(rafRef.current)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dataKey])
+  }, [dataKey, loopMs])
 
   const PAD_T = AXIS_PAD_T
   const PAD_B = AXIS_PAD_B
@@ -1039,6 +1099,8 @@ function CompareChart({
   const ptsA = project(revA)
   const ptsB = project(revB)
 
+  // Straight segments between points. Daily data is dense enough to read as a
+  // smooth line without spline interpolation.
   const pathStr = (pts: CmpPt[]) =>
     pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')
   const pathA = pathStr(ptsA)
@@ -1094,15 +1156,31 @@ function CompareChart({
           preserveAspectRatio="xMidYMid slice"
         />
         <circle cx={cx} cy={cy} r={LEAD_R} fill="none" stroke={color} strokeWidth={2.5} />
+        <text
+          x={cx + LEAD_R + 5}
+          y={cy}
+          textAnchor="start"
+          dominantBaseline="central"
+          fontSize={13}
+          fontWeight={700}
+          fontFamily={FONT}
+          fill={WHITE}
+          stroke={BG}
+          strokeWidth={4}
+          strokeLinejoin="round"
+          paintOrder="stroke"
+        >
+          {lead.price.toFixed(1)}
+        </text>
       </g>
     )
   }
 
   return (
     <div style={{ width: '100%', maxWidth: 760, height: '100%', display: 'flex', flexDirection: 'column' }}>
-      {/* One header per artist */}
-      <div style={{ display: 'flex', gap: 24 }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
+      {/* One header per artist (second one only when a 2nd artist is selected) */}
+      <div style={{ display: 'flex', gap: 24, justifyContent: 'center' }}>
+        <div style={{ flex: artistB ? '1 1 0' : '0 1 auto', minWidth: 0 }}>
           <ChartArtistHeader
             artist={artistA}
             drawingPrice={leadA ? leadA.price : null}
@@ -1113,17 +1191,19 @@ function CompareChart({
             valueUnit="pts"
           />
         </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <ChartArtistHeader
-            artist={artistB}
-            drawingPrice={leadB ? leadB.price : null}
-            fallbackPrice={artistB?.index_price ?? 0}
-            changeData={chgFor(revB)}
-            chartColor={colorB}
-            valuePrefix=""
-            valueUnit="pts"
-          />
-        </div>
+        {artistB && (
+          <div style={{ flex: '1 1 0', minWidth: 0 }}>
+            <ChartArtistHeader
+              artist={artistB}
+              drawingPrice={leadB ? leadB.price : null}
+              fallbackPrice={artistB?.index_price ?? 0}
+              changeData={chgFor(revB)}
+              chartColor={colorB}
+              valuePrefix=""
+              valueUnit="pts"
+            />
+          </div>
+        )}
       </div>
 
       {/* Shared chart: both lines overlaid on one growing, rescaling axis */}
@@ -1229,8 +1309,118 @@ function CompareChart({
   )
 }
 
+// ---- Small styled controls for the comparison tool ----
+const CONTROL_INPUT_STYLE: React.CSSProperties = {
+  background: 'rgba(255,255,255,0.04)',
+  color: WHITE,
+  border: `1px solid ${BORDER}`,
+  borderRadius: 8,
+  padding: '8px 10px',
+  fontSize: 14,
+  fontFamily: FONT,
+  outline: 'none',
+}
+const CONTROL_LABEL_STYLE: React.CSSProperties = {
+  fontSize: 11,
+  textTransform: 'uppercase',
+  letterSpacing: '0.12em',
+  color: SEC,
+  fontFamily: FONT,
+}
+
+function ControlSelect({
+  label,
+  value,
+  onChange,
+  options,
+}: {
+  label: string
+  value: string
+  onChange: (v: string) => void
+  options: { value: string; label: string }[]
+}) {
+  return (
+    <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <span style={CONTROL_LABEL_STYLE}>{label}</span>
+      <select value={value} onChange={(e) => onChange(e.target.value)} style={CONTROL_INPUT_STYLE}>
+        {options.map((o) => (
+          <option key={o.value || 'none'} value={o.value} style={{ background: '#111', color: WHITE }}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  )
+}
+
+function ControlNumber({
+  label,
+  value,
+  min,
+  max,
+  step,
+  onChange,
+}: {
+  label: string
+  value: number
+  min?: number
+  max?: number
+  step?: number
+  onChange: (n: number) => void
+}) {
+  return (
+    <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <span style={CONTROL_LABEL_STYLE}>{label}</span>
+      <input
+        type="number"
+        value={value}
+        min={min}
+        max={max}
+        step={step}
+        onChange={(e) => {
+          const n = Number(e.target.value)
+          if (!Number.isNaN(n)) onChange(n)
+        }}
+        style={CONTROL_INPUT_STYLE}
+      />
+    </label>
+  )
+}
+
+function ControlDate({
+  label,
+  value,
+  min,
+  max,
+  onChange,
+}: {
+  label: string
+  value: number | null
+  min: number | null
+  max: number | null
+  onChange: (ms: number) => void
+}) {
+  const iso = (ms: number | null) => (ms != null ? new Date(ms).toISOString().slice(0, 10) : '')
+  return (
+    <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <span style={CONTROL_LABEL_STYLE}>{label}</span>
+      <input
+        type="date"
+        value={iso(value)}
+        min={iso(min)}
+        max={iso(max)}
+        onChange={(e) => {
+          const t = new Date(e.target.value).getTime()
+          if (!Number.isNaN(t)) onChange(t)
+        }}
+        style={{ ...CONTROL_INPUT_STYLE, colorScheme: 'dark' }}
+      />
+    </label>
+  )
+}
+
 export default function LandingAnimations() {
-  const { artists: heroArtists, loaded: heroLoaded } = useHeroArtists()
+  const { artists: heroArtists, trends: trendsArtists, loaded: heroLoaded } = useHeroArtists()
   const mockData = useMemo(makeMockData, [])
   const [displayIndex, setDisplayIndex] = useState(0)
   const [opacity, setOpacity] = useState(1)
@@ -1257,10 +1447,56 @@ export default function LandingAnimations() {
   }, [heroLoaded, heroArtists.length])
 
   const artist = heroArtists[displayIndex] ?? null
-  // Compare tile uses a stable pair (first two of the shuffled roster) so its
-  // replay loops the SAME two artists continuously, independent of the hero cycle.
-  const compareA = heroArtists[0] ?? null
-  const compareB = heroArtists.length > 1 ? heroArtists[1] : null
+  // ---- Interactive comparison controls: pick artist(s) + a date range ----
+  // Date-range bounds span BOTH sources (Trends reaches 2004, Wikipedia 2015),
+  // so the picker covers the full union; each chart clamps to its own data.
+  const allArtists = useMemo(
+    () => [...heroArtists, ...trendsArtists],
+    [heroArtists, trendsArtists],
+  )
+  const dataMin = useMemo(() => {
+    let m = Infinity
+    for (const a of allArtists) {
+      const t = a.data_points[0]?.timestamp
+      if (t) m = Math.min(m, new Date(t).getTime())
+    }
+    return Number.isFinite(m) ? m : null
+  }, [allArtists])
+  const dataMax = useMemo(() => {
+    let m = -Infinity
+    for (const a of allArtists) {
+      const dp = a.data_points
+      const t = dp[dp.length - 1]?.timestamp
+      if (t) m = Math.max(m, new Date(t).getTime())
+    }
+    return Number.isFinite(m) ? m : null
+  }, [allArtists])
+
+  const [selectedAId, setSelectedAId] = useState<string | null>(null)
+  const [selectedBId, setSelectedBId] = useState<string | null | undefined>(undefined)
+  const [rangeStart, setRangeStart] = useState<number | null>(null)
+  const [rangeEnd, setRangeEnd] = useState<number | null>(null)
+  const [loopSeconds, setLoopSeconds] = useState(8) // full-loop target duration
+
+  // Defaults once the snapshot loads: first two artists, full date range.
+  // (undefined = not yet initialised; null for artist B = user picked "None".)
+  useEffect(() => {
+    if (!heroArtists.length) return
+    setSelectedAId((cur) => cur ?? heroArtists[0]?.id ?? null)
+    setSelectedBId((cur) => (cur === undefined ? heroArtists[1]?.id ?? null : cur))
+    setRangeStart((cur) => (cur == null ? dataMin : cur))
+    setRangeEnd((cur) => (cur == null ? dataMax : cur))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [heroArtists.length, dataMin, dataMax])
+
+  // Same selected artists, resolved against each data source.
+  const findA = (list: ArtistData[]) => list.find((a) => a.id === selectedAId) ?? null
+  const findB = (list: ArtistData[]) =>
+    selectedBId ? list.find((a) => a.id === selectedBId) ?? null : null
+  const wikiA = findA(heroArtists)
+  const wikiB = findB(heroArtists)
+  const trendsA = findA(trendsArtists)
+  const trendsB = findB(trendsArtists)
   const chartData = artist?.data_points ?? mockData
   const fallbackPrice =
     artist?.index_price ?? mockData[mockData.length - 1]?.index ?? 0
@@ -1345,10 +1581,80 @@ export default function LandingAnimations() {
           </Tile>
           )}
 
-          <Tile title="Compare (two artists)" aspect="9 / 16" maxWidth={540}>
-            {/* No windowMs → show the full Google Trends history that was fetched */}
-            <CompareChart artistA={compareA} artistB={compareB} />
-          </Tile>
+          {/* Interactive comparison: shared controls, then both data sources side by side */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 24, alignItems: 'center' }}>
+            {/* Shared controls row */}
+            <div
+              style={{
+                display: 'flex',
+                gap: 16,
+                flexWrap: 'wrap',
+                alignItems: 'flex-end',
+                justifyContent: 'center',
+                padding: 20,
+                border: `1px solid ${BORDER}`,
+                borderRadius: 12,
+                backgroundColor: 'rgba(255,255,255,0.02)',
+                fontFamily: FONT,
+              }}
+            >
+              <ControlSelect
+                label="Artist 1"
+                value={selectedAId ?? ''}
+                onChange={(v) => setSelectedAId(v || null)}
+                options={heroArtists.map((a) => ({ value: a.id ?? a.name, label: a.name }))}
+              />
+              <ControlSelect
+                label="Artist 2 (optional)"
+                value={selectedBId ?? ''}
+                onChange={(v) => setSelectedBId(v ? v : null)}
+                options={[
+                  { value: '', label: 'None' },
+                  ...heroArtists.map((a) => ({ value: a.id ?? a.name, label: a.name })),
+                ]}
+              />
+              <ControlDate label="Start" value={rangeStart} min={dataMin} max={dataMax} onChange={setRangeStart} />
+              <ControlDate label="End" value={rangeEnd} min={dataMin} max={dataMax} onChange={setRangeEnd} />
+              <ControlNumber
+                label="Loop time (seconds)"
+                value={loopSeconds}
+                min={2}
+                max={60}
+                step={1}
+                onChange={setLoopSeconds}
+              />
+            </div>
+
+            {/* Both sources, same selection */}
+            <div
+              style={{
+                display: 'flex',
+                gap: 24,
+                alignItems: 'flex-start',
+                justifyContent: 'center',
+                flexWrap: 'wrap',
+              }}
+            >
+              <Tile title="Wikipedia pageviews (daily)" aspect="9 / 16" maxWidth={500}>
+                <CompareChart
+                  artistA={wikiA}
+                  artistB={wikiB}
+                  windowStart={rangeStart ?? undefined}
+                  windowEnd={rangeEnd ?? undefined}
+                  loopMs={Math.max(loopSeconds, 1) * 1000}
+                />
+              </Tile>
+              <Tile title="Google Trends (monthly)" aspect="9 / 16" maxWidth={500}>
+                <CompareChart
+                  artistA={trendsA}
+                  artistB={trendsB}
+                  windowStart={rangeStart ?? undefined}
+                  windowEnd={rangeEnd ?? undefined}
+                  loopMs={Math.max(loopSeconds, 1) * 1000}
+                />
+              </Tile>
+            </div>
+          </div>
         </div>
       </div>
     </div>
