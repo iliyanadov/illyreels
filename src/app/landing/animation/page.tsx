@@ -1753,6 +1753,72 @@ function ControlSegmented({
   )
 }
 
+// Editable title for the white tape. Auto-shrinks the font so the wrapped text
+// always fits the fixed tape: a binary search picks the largest font size at
+// which the (wrapping) content still fits the tape's width and height, re-run on
+// every keystroke and whenever the tape resizes. Uncontrolled (content lives in
+// the DOM) so re-renders never disturb the caret.
+function TapeTitle() {
+  const ref = useRef<HTMLDivElement>(null)
+
+  const fit = () => {
+    const el = ref.current
+    const box = el?.parentElement
+    if (!el || !box) return
+    const maxW = box.clientWidth * 0.9
+    const maxH = box.clientHeight * 0.88
+    let lo = 8
+    let hi = Math.max(12, box.clientHeight * 0.7)
+    let best = lo
+    for (let i = 0; i < 16; i++) {
+      const mid = (lo + hi) / 2
+      el.style.fontSize = `${mid}px`
+      if (el.scrollWidth <= maxW + 1 && el.scrollHeight <= maxH + 1) {
+        best = mid
+        lo = mid
+      } else {
+        hi = mid
+      }
+    }
+    el.style.fontSize = `${best}px`
+  }
+
+  useEffect(() => {
+    fit()
+    const box = ref.current?.parentElement
+    if (!box) return
+    const ro = new ResizeObserver(() => fit())
+    ro.observe(box)
+    return () => ro.disconnect()
+  }, [])
+
+  return (
+    <div
+      ref={ref}
+      contentEditable
+      suppressContentEditableWarning
+      data-tape-title=""
+      data-placeholder="Type a title…"
+      onInput={fit}
+      style={{
+        width: '90%',
+        outline: 'none',
+        border: 'none',
+        background: 'transparent',
+        textAlign: 'center',
+        color: '#000000',
+        fontFamily: 'var(--font-geist-sans)',
+        fontWeight: 600,
+        fontSize: '40px',
+        lineHeight: 1.12,
+        whiteSpace: 'pre-wrap',
+        wordBreak: 'break-word',
+        cursor: 'text',
+      }}
+    />
+  )
+}
+
 export default function LandingAnimations() {
   const { artists: heroArtists, trends: trendsArtists, loaded: heroLoaded } = useHeroArtists()
   const mockData = useMemo(makeMockData, [])
@@ -1814,7 +1880,6 @@ export default function LandingAnimations() {
   const [normalised, setNormalised] = useState(false) // min–max each series to 0–100
   const [smoothing, setSmoothing] = useState(0) // 0–100 moving-average strength
   const [source, setSource] = useState<'wikipedia' | 'combined' | 'trends'>('combined')
-  const [tapeText, setTapeText] = useState('')
 
   // Defaults once the snapshot loads: Drake vs Kendrick Lamar, full date range.
   // (undefined = not yet initialised; null for artist B = user picked "None".)
@@ -1874,6 +1939,10 @@ export default function LandingAnimations() {
         @keyframes sxTextPop {
           0%   { opacity: 0; transform: translateY(14px) scale(0.92); }
           100% { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        [data-tape-title]:empty:before {
+          content: attr(data-placeholder);
+          color: #9ca3af;
         }
       `}</style>
 
@@ -2018,6 +2087,8 @@ export default function LandingAnimations() {
                   margin: '0 auto',
                 }}
               >
+                {/* 100px (of 1920) of dark canvas above the tape. */}
+                <div style={{ width: '100%', height: '5.2083%', flexShrink: 0 }} />
                 {/* White title tape — 1080x300 band (15.625% of the canvas),
                     full-bleed, with centred editable black Geist text. */}
                 <div
@@ -2029,27 +2100,9 @@ export default function LandingAnimations() {
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    containerType: 'inline-size',
                   }}
                 >
-                  <input
-                    type="text"
-                    value={tapeText}
-                    onChange={(e) => setTapeText(e.target.value)}
-                    placeholder="Type a title…"
-                    style={{
-                      width: '92%',
-                      border: 'none',
-                      outline: 'none',
-                      background: 'transparent',
-                      textAlign: 'center',
-                      color: '#000000',
-                      fontFamily: 'var(--font-geist-sans)',
-                      fontWeight: 600,
-                      fontSize: 'clamp(14px, 7cqw, 96px)',
-                      padding: 0,
-                    }}
-                  />
+                  <TapeTitle />
                 </div>
                 {/* Chart area — remaining 84.375%, padded. */}
                 <div
